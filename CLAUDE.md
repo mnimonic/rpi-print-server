@@ -14,7 +14,10 @@ be missing on other machines.
 - **Lean and fast.** Unneeded services are disabled (see `scripts/03-tune-headless.sh`).
   Avoid adding heavy dependencies; the Pi is a single-core ARMv6 at 700 MHz with 512 MB RAM.
   The web pages use only the Python standard library.
-- **Wi-Fi only.** Ethernet autoconnect is off on purpose; the fixed IP lives on wlan0.
+- **Wi-Fi only.** Ethernet autoconnect is off on purpose.
+- **wlan0 uses DHCP** (since 2026-10-27, owner's choice: "let dhcp do its job"). The router has
+  no reservation, so the address may change; use the name `<hostname>.lan` (router DNS) or
+  `<hostname>.local`, not a hard-coded IP. Switched with `scripts/09-wifi-dhcp.sh`.
 - **Printer queue uses the generic `usb://HP/Deskjet%201510%20series` URI.** Switching to the
   `hp:/usb/...?serial=` URI was attempted and the owner stopped it (printing already worked).
   Don't change it without asking.
@@ -89,8 +92,6 @@ be missing on other machines.
 ## Open items
 
 - Change the Pi user's password from its weak initial value; set up SSH keys.
-- Router: the Pi's fixed IP is inside the router's DHCP pool, and the router (Cudy, see
-  `CLAUDE.local.md`) has no DHCP reservation feature. Decide: shrink the pool or move the Pi's IP.
 - Optional: Ethernet as an emergency fallback when Wi-Fi is down (offered, not done).
 - Optional: ink levels on the welcome page (needs the `hp:` backend; see preferences).
 - Optional: a LICENSE file (none chosen yet).
