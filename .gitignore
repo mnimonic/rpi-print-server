@@ -13,3 +13,6 @@ __pycache__/
 
 # Private notes about this specific installation (IPs, MACs, serials)
 CLAUDE.local.md
+
+# Release packages (scripts/release.sh)
+dist/

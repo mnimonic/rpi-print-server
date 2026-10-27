@@ -6,7 +6,7 @@
 # an address. Everything else follows the Pi by name: <hostname>.local, the Windows
 # Network entry (SSDP), the printer on phones (Bonjour) and the welcome page QR codes.
 #
-# Usage (as root):  sudo WIFI_PROFILE=wlan0-MyWifi ./09-wifi-dhcp.sh
+# Usage (as root):  sudo WIFI_PROFILE=wlan0-MyWifi ./08-wifi-dhcp.sh
 #
 # Runs detached, because the SSH session drops when the address changes.
 # Afterwards find the Pi at http://<hostname>.lan/ or http://<hostname>.local/.

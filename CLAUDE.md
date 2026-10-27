@@ -17,7 +17,7 @@ be missing on other machines.
 - **Wi-Fi only.** Ethernet autoconnect is off on purpose.
 - **wlan0 uses DHCP** (since 2026-10-27, owner's choice: "let dhcp do its job"). The router has
   no reservation, so the address may change; use the name `<hostname>.lan` (router DNS) or
-  `<hostname>.local`, not a hard-coded IP. Switched with `scripts/09-wifi-dhcp.sh`.
+  `<hostname>.local`, not a hard-coded IP. Switched with `scripts/08-wifi-dhcp.sh`.
 - **Printer queue uses the generic `usb://HP/Deskjet%201510%20series` URI.** Switching to the
   `hp:/usb/...?serial=` URI was attempted and the owner stopped it (printing already worked).
   Don't change it without asking.
@@ -43,12 +43,17 @@ be missing on other machines.
   ```
   A harmless `<password>: command not found` line appears when sudo already has cached
   credentials; filter it out.
-- **Deploy with `scripts/deploy.sh`** (from Git Bash): `PI_HOST=... PI_USER=... PI_PASS=...
-  ./scripts/deploy.sh [--dry-run]`. Pass the credentials as env vars; never write them into
-  the script (it's tracked). It installs only the changed files, restarts only the affected
-  services and checks they're running.
-- Releases are annotated tags `vX.Y.Z`. Tag before deploying so the welcome page footer
-  shows a clean version (it's stamped from `git describe --tags --dirty`).
+- **Release, then deploy** (from Git Bash): commit, run `./scripts/release.sh vX.Y.Z "msg"`
+  (tags the commit, builds `dist/rpi-print-server-vX.Y.Z.tar.gz`), then
+  `PI_HOST=... PI_USER=... PI_PASS=... ./scripts/deploy.sh [--dry-run] <package>`.
+  `deploy.sh` without a package deploys a `-dirty` snapshot of the working tree for testing.
+  Pass the credentials as env vars; never write them into `deploy.sh` (it's tracked).
+- The list of deployed files lives in `scripts/release.sh` (`FILES`), and where each one is
+  installed lives in `scripts/install-release.sh`. Keep the two in sync when adding a file.
+- Pushing commits and tags to GitHub is the owner's call; ask before `git push`.
+- `plink -batch` refuses unknown host keys, and the Pi's address can change (DHCP). The key
+  for a new address can be copied from an existing `ssh-ed25519@22:<old ip>` value under
+  `HKCU\Software\SimonTatham\PuTTY\SshHostKeys`; plink then still verifies it.
 - For anything that drops the network (switching interfaces), run the change **detached with
   an automatic rollback** (`setsid nohup`; see `scripts/05-wifi-only.sh`).
 - Long operations on the Pi 1 (apt, boot ~2 min, 600 dpi scans ~100 s) need long timeouts

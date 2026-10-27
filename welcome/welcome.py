@@ -8,7 +8,8 @@ from email.utils import formatdate
 from functools import lru_cache
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-# Replaced with `git describe --tags` when deployed (scripts/deploy.sh, 07-install-welcome.sh)
+# Replaced with the release version when packaged (scripts/release.sh) or installed from a
+# git checkout (scripts/07-install-welcome.sh)
 VERSION = "dev"
 PORT = int(os.environ.get("WELCOME_PORT", "80"))
 QUEUE = os.environ.get("PRINTER_QUEUE", "DeskJet_1515")

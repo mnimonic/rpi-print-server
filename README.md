@@ -20,20 +20,33 @@ into a network print and scan server for a USB **HP DeskJet 1515** (any DeskJet
 
 ## Repository layout
 
+Numbered scripts run **on the Pi** (first-time setup):
+
 | Path | What it is |
 |---|---|
 | `scripts/01-print-server.sh` | Installs CUPS, HPLIP, SANE, Avahi; enables sharing and the CUPS web UI |
 | `scripts/02-add-printer.sh` | Adds and shares the DeskJet queue (A4, retry on error) |
 | `scripts/03-tune-headless.sh` | Disables unneeded services, headless `config.txt`, HDMI off |
 | `scripts/04-networkmanager-without-netplan.sh` | Moves network profiles from netplan to native NetworkManager keyfiles (big boot-time win) |
-| `scripts/05-wifi-only.sh` | Moves the fixed IP to Wi-Fi, turns Ethernet autoconnect off, auto-rollback |
+| `scripts/05-wifi-only.sh` | Moves a fixed IP to Wi-Fi, turns Ethernet autoconnect off, auto-rollback |
 | `scripts/06-install-scanweb.sh` | Installs the scan web page as a systemd service |
-| `scripts/07-install-welcome.sh` | Installs the welcome page as a systemd service on port 80 |
-| `scripts/09-wifi-dhcp.sh` | Switches the Wi-Fi profile to DHCP (for routers without address reservation), auto-rollback |
-| `scripts/deploy.sh` | Run on your computer: pushes changes to an installed Pi, restarts what changed |
-| `scripts/08-advertise.sh` | Installs the Bonjour records and (re)installs the welcome page with SSDP and QR codes |
-| `welcome/welcome.py` | The welcome/status page |
-| `welcome/welcome.service` | Its systemd unit (throwaway `DynamicUser`, only allowed to bind port 80) |
+| `scripts/07-install-welcome.sh` | Installs the welcome page (port 80) and the Bonjour records for both pages |
+| `scripts/08-wifi-dhcp.sh` | Switches the Wi-Fi profile to DHCP (for routers without address reservation), auto-rollback |
+
+The other scripts run **on your computer** (updates after setup):
+
+| Path | What it is |
+|---|---|
+| `scripts/release.sh` | Builds a release package (`dist/*.tar.gz`) and tags the version |
+| `scripts/deploy.sh` | Uploads a release package to the Pi and installs it |
+| `scripts/install-release.sh` | The installer inside each package (runs on the Pi as `install.sh`) |
+
+The rest:
+
+| Path | What it is |
+|---|---|
+| `welcome/welcome.py` | The welcome/status page, SSDP responder and QR encoder |
+| `welcome/welcome.service` | Its systemd unit (throwaway `DynamicUser`, may only bind port 80) |
 | `scanweb/scanweb.py` | The scan web server |
 | `scanweb/scanweb.service` | Its systemd unit (runs as a restricted `scanweb` user) |
 | `config/config.txt.append` | Lines appended to `/boot/firmware/config.txt` |
@@ -53,8 +66,7 @@ sudo ./scripts/02-add-printer.sh           # add the DeskJet (PAPER=Letter to ov
 sudo ./scripts/03-tune-headless.sh         # optional: slim down a headless Pi
 sudo ./scripts/04-networkmanager-without-netplan.sh   # optional: faster boot on slow Pis
 sudo ./scripts/06-install-scanweb.sh       # scan web page
-sudo ./scripts/07-install-welcome.sh       # welcome / status page on port 80
-sudo ./scripts/08-advertise.sh             # Bonjour records, SSDP, QR codes
+sudo ./scripts/07-install-welcome.sh       # welcome page on port 80 + Bonjour records
 sudo reboot
 ```
 
@@ -71,7 +83,7 @@ Some routers (e.g. Cudy M3600 firmware 2.3.x) have no DHCP reservation. Then eit
 a fixed IP *outside* the router's DHCP pool, or let DHCP assign the address:
 
 ```bash
-sudo WIFI_PROFILE=wlan0-MyWifi ./scripts/09-wifi-dhcp.sh
+sudo WIFI_PROFILE=wlan0-MyWifi ./scripts/08-wifi-dhcp.sh
 ```
 
 With DHCP, many routers (OpenWrt-based ones such as Cudy, and most dnsmasq routers) give
@@ -82,27 +94,44 @@ give clients public DNS servers (e.g. 1.1.1.1 / 8.8.8.8), clients never ask the 
 `.lan` names don't resolve. Clear those fields, and set the public servers as the router's
 upstream DNS instead.
 
-## Deploying changes
+## Releasing and deploying changes
 
-Once a Pi is set up, deploy later changes from your computer (Linux, macOS, or Git Bash on
-Windows) instead of copying the repository again:
+Once a Pi is set up, ship later changes from your computer (Linux, macOS, or Git Bash on
+Windows) as a release package instead of copying the repository again.
+
+**1. Release.** Commit your changes, then:
 
 ```bash
-PI_HOST=192.168.1.50 PI_USER=pi ./scripts/deploy.sh --dry-run   # show what would change
-PI_HOST=192.168.1.50 PI_USER=pi ./scripts/deploy.sh             # copy, restart, verify
+./scripts/release.sh v1.2.0 "Short description"   # tags the commit, builds the package
+git push --follow-tags                             # publish the commit and the tag
 ```
 
-The host, user and password can also be set at the top of the script. Never commit a real
-password, because the repository is public. Without `PI_PASS` it uses your SSH keys and
-sudo asks for the password. With `PI_PASS` it needs PuTTY's `plink` (Windows) or `sshpass`.
-Only files that differ from the Pi's copies are installed, and only the affected services
-are restarted. Components that were never installed are skipped.
+This builds `dist/rpi-print-server-v1.2.0.tar.gz`, which contains the files that go onto
+the Pi, `VERSION`, and `install.sh`. The version is stamped into `welcome.py` and shown in
+the welcome page footer. The script refuses to tag uncommitted changes or reuse a tag.
+Versions follow `vMAJOR.MINOR.PATCH`.
 
-**Versions.** Releases are git tags (`v1.0.0`, `v1.1.0`, ...). The deploy and install scripts
-stamp `git describe --tags --dirty` into `welcome.py`, so the welcome page footer shows
-exactly what is running: `v1.0.0`, or `v1.0.0-2-gabc1234-dirty` for later commits and
-uncommitted changes. To release, commit, then run `git tag -a v1.1.0 -m "..."`,
-`git push --follow-tags` and `./scripts/deploy.sh`.
+**2. Deploy.**
+
+```bash
+export PI_HOST=192.168.1.50 PI_USER=pi              # or edit the top of deploy.sh
+./scripts/deploy.sh --dry-run dist/rpi-print-server-v1.2.0.tar.gz   # what would change
+./scripts/deploy.sh dist/rpi-print-server-v1.2.0.tar.gz             # install it
+```
+
+Without a package argument, `deploy.sh` builds a snapshot of your working tree and deploys
+that. The footer then shows e.g. `v1.2.0-3-gabc1234-dirty`, which is handy for testing
+before a release. Never commit a real password into `deploy.sh`, because the repository is
+public. Without `PI_PASS` it uses your SSH keys and sudo asks for the password. With
+`PI_PASS` it needs PuTTY's `plink` (Windows) or `sshpass`.
+
+The installer copies only the files that differ from the Pi's, restarts only the affected
+services, checks that they're running (and shows their log if not), and skips components
+that were never set up. Without `deploy.sh`, copy the package to the Pi and run:
+
+```bash
+tar -xzf rpi-print-server-v1.2.0.tar.gz && sudo ./rpi-print-server-v1.2.0/install.sh
+```
 
 ## Using it
 

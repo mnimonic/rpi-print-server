@@ -128,3 +128,23 @@ passwords, Wi-Fi details, MAC addresses, serial numbers) are left out on purpose
   but only by blank lines.
 - The welcome page footer shows the version, stamped from `git describe` at deploy
   time. The first tag is `v1.0.0`.
+
+## 12. Wi-Fi via DHCP and router DNS
+
+- The router (Cudy M3600) can't reserve addresses, so the Pi now uses DHCP
+  (`scripts/08-wifi-dhcp.sh`, with automatic rollback). It came back in 35 s with
+  a new address, and the router's DNS knows it as `<hostname>.lan`.
+- The router was handing clients public DNS servers (1.1.1.1 / 8.8.8.8), so
+  `.lan` names didn't resolve anywhere. With the owner's OK, its DHCP now hands
+  out the router itself, and the router forwards to the same public servers.
+- The welcome page finds its `.lan` name by reverse lookup and uses it for the
+  QR codes and info sheet, so a printed sheet survives an address change.
+
+## 13. Cleanup and release packages
+
+- `08-advertise.sh` was merged into `07-install-welcome.sh` (both installed the
+  welcome page), and `09-wifi-dhcp.sh` was renumbered to `08`.
+- `scripts/release.sh` builds a versioned package (files + `install.sh` +
+  `VERSION`) and tags the commit. `deploy.sh` now only uploads a package and
+  runs its installer; the installer moved out of a heredoc into
+  `scripts/install-release.sh`.
