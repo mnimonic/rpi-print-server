@@ -123,10 +123,21 @@ Raspberry Pi OS trixie and HPLIP 3.22.10:
   600 dpi). The converter uses the rows actually received.
 - **"Device busy" for a few seconds after each scan.** The server retries.
 - **Under-voltage after adding a Wi-Fi adapter.** `vcgencmd get_throttled`
-  reported `0x50005` (under-voltage and throttling happening now). The welcome
-  page warns about this; the fix is a proper 5 V / 2.5 A supply and a short, thick cable.
-- **No idle down-clocking on a Pi 1.** `arm_freq_min` is ignored at the stock
-  clock, so the CPU stays at 700 MHz. It still idles at about 40 °C.
+  reported `0x50005` (under-voltage and throttling happening now), and the
+  kernel logged `hwmon hwmon1: Undervoltage detected!` lasting several minutes
+  around an unexpected restart. The welcome page warns about this. The fix is
+  a proper 5 V / 2.5 A supply and a short, thick cable; a weak supply can
+  crash the Pi and corrupt the SD card.
+- **No idle down-clocking on a Pi 1.** The firmware tells Linux the CPU range
+  is 700–700 MHz, so the `ondemand` governor has nothing to scale between.
+  `arm_freq_min=300` is ignored at the stock clock: on a Pi 1, dynamic clocking
+  is only enabled when overclocked. It hardly matters, because an idle CPU
+  already sleeps between tasks, and the core voltage stays at 1.20 V either way,
+  so a lower idle clock would save only a few hundredths of a watt. Idle
+  temperature is about 35–40 °C. Alternatives if you still want it:
+  - `arm_freq=500` for a fixed lower clock: slightly cooler, but about 30% slower.
+  - `arm_freq=701` with `arm_freq_min=300`: a nominal 1 MHz "overclock" with no
+    voltage change, which may unlock scaling. Untested.
 
 ## Wi-Fi adapters
 
@@ -135,6 +146,9 @@ installs, e.g. **TP-Link TL-WN823N** (RTL8192EU, tested) or **TL-WN725N**
 (RTL8188EUS). Avoid "driver-free"/AIC8800 adapters, which have no mainline
 Linux driver. The Pi 1's shared USB bus limits throughput to roughly
 20–30 Mbps, which is plenty for printing.
+
+A Wi-Fi adapter adds a noticeable current draw. Use a good 5 V / 2.5 A power
+supply, or the Pi will report under-voltage (see the welcome page).
 
 ## Security notes
 
