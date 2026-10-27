@@ -8,6 +8,8 @@ from email.utils import formatdate
 from functools import lru_cache
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# Replaced with `git describe --tags` when deployed (scripts/deploy.sh, 07-install-welcome.sh)
+VERSION = "dev"
 PORT = int(os.environ.get("WELCOME_PORT", "80"))
 QUEUE = os.environ.get("PRINTER_QUEUE", "DeskJet_1515")
 PRINTER_NAME = "HP DeskJet 1515"
@@ -727,7 +729,7 @@ a.button:hover { border-color: var(--accent); }
   </details>
 </section>
 
-<footer>Updates every 5 seconds · <span id="updated"></span></footer>
+<footer><a href="https://github.com/mnimonic/rpi-print-server/releases" style="color:inherit">rpi-print-server {{version}}</a> · Updates every 5 seconds · <span id="updated"></span></footer>
 </main>
 <script>
 const host = location.hostname;
@@ -976,7 +978,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/sheet"):
             page = PAGE if path == "/" else SHEET
             for key, val in {"host": html.escape(socket.gethostname()), "printer": html.escape(PRINTER_NAME),
-                             "queue": QUEUE, "scanport": str(SCANNER_PORT), "ip": ip,
+                             "queue": QUEUE, "scanport": str(SCANNER_PORT), "ip": ip, "version": html.escape(VERSION),
                              "local": html.escape(socket.gethostname()) + ".local",
                              "qr_home": qr_svg(f"http://{ip}/"),
                              "qr_scan": qr_svg(f"http://{ip}:{SCANNER_PORT}/")}.items():

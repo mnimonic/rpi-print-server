@@ -29,6 +29,7 @@ into a network print and scan server for a USB **HP DeskJet 1515** (any DeskJet
 | `scripts/05-wifi-only.sh` | Moves the fixed IP to Wi-Fi, turns Ethernet autoconnect off, auto-rollback |
 | `scripts/06-install-scanweb.sh` | Installs the scan web page as a systemd service |
 | `scripts/07-install-welcome.sh` | Installs the welcome page as a systemd service on port 80 |
+| `scripts/deploy.sh` | Run on your computer: pushes changes to an installed Pi, restarts what changed |
 | `scripts/08-advertise.sh` | Installs the Bonjour records and (re)installs the welcome page with SSDP and QR codes |
 | `welcome/welcome.py` | The welcome/status page |
 | `welcome/welcome.service` | Its systemd unit (throwaway `DynamicUser`, only allowed to bind port 80) |
@@ -67,6 +68,28 @@ Then reserve that IP for the Pi's Wi-Fi MAC address in your router's DHCP
 settings (or exclude it from the DHCP range), so nothing else gets the same address.
 Some routers (e.g. Cudy M3600 firmware 2.3.x) have no DHCP reservation; there, either
 pick a fixed IP *outside* the router's DHCP pool or shrink the pool so it excludes the Pi.
+
+## Deploying changes
+
+Once a Pi is set up, deploy later changes from your computer (Linux, macOS, or Git Bash on
+Windows) instead of copying the repository again:
+
+```bash
+PI_HOST=192.168.1.50 PI_USER=pi ./scripts/deploy.sh --dry-run   # show what would change
+PI_HOST=192.168.1.50 PI_USER=pi ./scripts/deploy.sh             # copy, restart, verify
+```
+
+The host, user and password can also be set at the top of the script. Never commit a real
+password, because the repository is public. Without `PI_PASS` it uses your SSH keys and
+sudo asks for the password. With `PI_PASS` it needs PuTTY's `plink` (Windows) or `sshpass`.
+Only files that differ from the Pi's copies are installed, and only the affected services
+are restarted. Components that were never installed are skipped.
+
+**Versions.** Releases are git tags (`v1.0.0`, `v1.1.0`, ...). The deploy and install scripts
+stamp `git describe --tags --dirty` into `welcome.py`, so the welcome page footer shows
+exactly what is running: `v1.0.0`, or `v1.0.0-2-gabc1234-dirty` for later commits and
+uncommitted changes. To release, commit, then run `git tag -a v1.1.0 -m "..."`,
+`git push --follow-tags` and `./scripts/deploy.sh`.
 
 ## Using it
 

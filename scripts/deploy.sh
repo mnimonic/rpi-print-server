@@ -75,6 +75,11 @@ for f in "${FILES[@]}"; do
     cp "$f" "$STAGE/$f"
 done
 
+# Version shown on the welcome page: the git tag (v1.0.0), or e.g. v1.0.0-3-gabc1234-dirty
+# for commits after the tag and uncommitted changes
+VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
+sed "s/^VERSION = \"dev\"/VERSION = \"$VERSION\"/" welcome/welcome.py > "$STAGE/welcome/welcome.py"
+
 # Runs on the Pi as root
 cat > "$STAGE/apply.sh" <<'EOF'
 #!/bin/bash
@@ -152,7 +157,7 @@ exit $FAILED
 EOF
 
 # ---------------------------------------------------------------- upload and apply
-echo "Deploying to $PI_USER@$PI_HOST"
+echo "Deploying $VERSION to $PI_USER@$PI_HOST"
 REMOTE_DIR=/tmp/rpi-deploy
 tar -C "$STAGE" -cf - . | remote "rm -rf $REMOTE_DIR && mkdir -p $REMOTE_DIR && tar -xf - -C $REMOTE_DIR" || {
     echo "Upload failed. Check PI_HOST/PI_USER/PI_PASS. With plink, connect once by hand" >&2

@@ -40,15 +40,19 @@ be missing on other machines.
   ```
   A harmless `<password>: command not found` line appears when sudo already has cached
   credentials; filter it out.
-- Deploy a file: `pscp` it to `/tmp`, strip CRLF (`sed -i 's/\r$//'`), then
-  `install -m 755 ... /usr/local/bin/` and `systemctl restart <service>`.
+- **Deploy with `scripts/deploy.sh`** (from Git Bash): `PI_HOST=... PI_USER=... PI_PASS=...
+  ./scripts/deploy.sh [--dry-run]`. Pass the credentials as env vars; never write them into
+  the script (it's tracked). It installs only the changed files, restarts only the affected
+  services and checks they're running.
+- Releases are annotated tags `vX.Y.Z`. Tag before deploying so the welcome page footer
+  shows a clean version (it's stamped from `git describe --tags --dirty`).
 - For anything that drops the network (switching interfaces), run the change **detached with
   an automatic rollback** (`setsid nohup`; see `scripts/05-wifi-only.sh`).
 - Long operations on the Pi 1 (apt, boot ~2 min, 600 dpi scans ~100 s) need long timeouts
   or background runs.
-- Check that a change on the Pi matches the repo with `md5sum` of
-  `/usr/local/bin/{scanweb,welcome}.py` and `/etc/systemd/system/{scanweb,welcome}.service`
-  against `scanweb/`, `welcome/`. They were identical at the last check.
+- Check that the Pi matches the repo with `./scripts/deploy.sh --dry-run` (all lines
+  `unchanged`). A plain `md5sum` of `welcome.py` no longer matches, because the deployed
+  copy has the stamped `VERSION` line.
 
 ## Deployed services on the Pi
 

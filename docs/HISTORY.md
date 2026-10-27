@@ -119,3 +119,12 @@ passwords, Wi-Fi details, MAC addresses, serial numbers) are left out on purpose
 - Added Avahi `_http._tcp` records for both pages (`config/avahi/`).
 - Router DHCP reservation: the router has no reservation feature (only static ARP
   binding), so this is still open.
+
+## 11. Deploy script and versions
+
+- `scripts/deploy.sh` runs on the dev machine. It uploads one tar over SSH (plink or
+  OpenSSH), installs only the files that differ, restarts the affected services and
+  checks them. It also found that the Pi's `hdmi-off.service` differed from the repo,
+  but only by blank lines.
+- The welcome page footer shows the version, stamped from `git describe` at deploy
+  time. The first tag is `v1.0.0`.
