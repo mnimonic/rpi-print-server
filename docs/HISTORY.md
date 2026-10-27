@@ -159,3 +159,10 @@ passwords, Wi-Fi details, MAC addresses, serial numbers) are left out on purpose
 - Then the QR codes switched to `<hostname>.local` (the owner's Android resolves
   it), with the IP as a fallback, so a printed sheet survives a DHCP address
   change without depending on the router. Released as v1.3.0.
+
+## 15. Script cleanup
+
+- `05-wifi-only.sh` (fixed IP) and `08-wifi-dhcp.sh` (DHCP) were merged into one
+  `05-wifi-only.sh`: DHCP by default, fixed IP with `IP=`/`GW=`. The Wi-Fi
+  template now uses DHCP too. Session leftovers on the Pi were removed; the
+  network backups in `/root/` were kept.

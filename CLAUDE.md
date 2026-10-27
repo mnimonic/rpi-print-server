@@ -17,7 +17,7 @@ be missing on other machines.
 - **Wi-Fi only.** Ethernet autoconnect is off on purpose.
 - **wlan0 uses DHCP** (since 2026-10-27, owner's choice: "let dhcp do its job"). The router has
   no reservation, so the address may change; use `<hostname>.local`, not a hard-coded IP.
-  Switched with `scripts/08-wifi-dhcp.sh`.
+  Switched with `scripts/05-wifi-only.sh` (DHCP is its default).
 - **No router-specific features.** The owner rejected using the router's `.lan` DNS names
   (other users' routers differ). QR codes and the info sheet use `<hostname>.local` (works on the
   owner's Android); the IP is shown as a fallback.

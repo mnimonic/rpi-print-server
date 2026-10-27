@@ -28,10 +28,9 @@ Numbered scripts run **on the Pi** (first-time setup):
 | `scripts/02-add-printer.sh` | Adds and shares the DeskJet queue (A4, retry on error) |
 | `scripts/03-tune-headless.sh` | Disables unneeded services, headless `config.txt`, HDMI off |
 | `scripts/04-networkmanager-without-netplan.sh` | Moves network profiles from netplan to native NetworkManager keyfiles (big boot-time win) |
-| `scripts/05-wifi-only.sh` | Moves a fixed IP to Wi-Fi, turns Ethernet autoconnect off, auto-rollback |
+| `scripts/05-wifi-only.sh` | Wi-Fi only: Ethernet autoconnect off, Wi-Fi on DHCP (or a fixed IP), auto-rollback |
 | `scripts/06-install-scanweb.sh` | Installs the scan web page as a systemd service |
 | `scripts/07-install-welcome.sh` | Installs the welcome page (port 80) and the Bonjour records for both pages |
-| `scripts/08-wifi-dhcp.sh` | Switches the Wi-Fi profile to DHCP (for routers without address reservation), auto-rollback |
 
 The other scripts run **on your computer** (updates after setup):
 
@@ -51,7 +50,7 @@ The rest:
 | `scanweb/scanweb.service` | Its systemd unit (runs as a restricted `scanweb` user) |
 | `config/config.txt.append` | Lines appended to `/boot/firmware/config.txt` |
 | `config/hdmi-off.service` | Turns HDMI output off at boot |
-| `config/wifi.nmconnection.example` | Template Wi-Fi profile with a fixed IP |
+| `config/wifi.nmconnection.example` | Template Wi-Fi profile (DHCP, fixed IP commented out) |
 | `config/avahi/printserver-*.service` | Bonjour (`_http._tcp`) records for the welcome and scan pages |
 
 ## Setup
@@ -74,21 +73,15 @@ Optional, to run on Wi-Fi only (do this while still connected by Ethernet):
 
 ```bash
 ls /etc/NetworkManager/system-connections/       # find your Wi-Fi profile name
-sudo IP=192.168.1.50/24 GW=192.168.1.1 WIFI_PROFILE=wlan0-MyWifi ./scripts/05-wifi-only.sh
+sudo WIFI_PROFILE=wlan0-MyWifi ./scripts/05-wifi-only.sh
 ```
 
-Then reserve that IP for the Pi's Wi-Fi MAC address in your router's DHCP
-settings (or exclude it from the DHCP range), so nothing else gets the same address.
-Some routers (e.g. Cudy M3600 firmware 2.3.x) have no DHCP reservation. Then either pick
-a fixed IP *outside* the router's DHCP pool, or let DHCP assign the address:
-
-```bash
-sudo WIFI_PROFILE=wlan0-MyWifi ./scripts/08-wifi-dhcp.sh
-```
-
-With DHCP the address can change, so refer to the Pi by its mDNS name
-(`http://<hostname>.local/`) and add printers on PCs by that name rather than the IP. The
-Bonjour and SSDP announcements and the QR codes follow the new address automatically.
+The Wi-Fi then uses DHCP. The address may change, but `http://<hostname>.local/`, the
+Bonjour and SSDP announcements and the welcome page QR codes follow it, and PCs should add
+the printer by that name. For a fixed IP instead, add `IP=192.168.1.50/24 GW=192.168.1.1`,
+and reserve that IP for the Pi in your router (or pick one outside the router's DHCP pool)
+so nothing else gets the same address. If anything goes wrong the script restores the
+previous settings after about 90 s.
 
 ## Releasing and deploying changes
 

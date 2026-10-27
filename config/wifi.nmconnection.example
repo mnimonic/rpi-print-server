@@ -22,10 +22,13 @@ key-mgmt=wpa-psk
 psk=YOUR_WIFI_PASSWORD
 
 [ipv4]
-method=manual
-# <pi address>/<prefix>,<router>
-address1=192.168.1.50/24,192.168.1.1
-dns=1.1.1.1;192.168.1.1;
+# DHCP: the router assigns the address; reach the Pi as http://<hostname>.local/
+method=auto
+dhcp-send-hostname=true
+# Fixed IP instead (only if the router reserves it or it's outside the DHCP pool):
+#method=manual
+#address1=192.168.1.50/24,192.168.1.1
+#dns=1.1.1.1;192.168.1.1;
 
 [ipv6]
 method=ignore
