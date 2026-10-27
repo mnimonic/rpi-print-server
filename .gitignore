@@ -10,3 +10,6 @@
 
 __pycache__/
 *.pyc
+
+# Private notes about this specific installation (IPs, MACs, serials)
+CLAUDE.local.md
