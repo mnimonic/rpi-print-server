@@ -4,6 +4,10 @@ Turns an old Raspberry Pi (tested on a **Pi 1 Model B+**, Raspberry Pi OS 13 "tr
 into a network print and scan server for a USB **HP DeskJet 1515** (any DeskJet
 1510-series model should work).
 
+- **Welcome page** (`http://<pi>/`): live printer status, links to scanning and
+  the print queue, and Pi health: CPU usage/temperature graphs, clock speed, core
+  and RAM voltages, under-voltage/throttling detection, memory, SD card, Wi-Fi
+  signal and hardware details.
 - **Printing**: CUPS + HPLIP, shared on the LAN and discoverable by Windows, macOS,
   iOS and Android (Avahi/IPP).
 - **Scanning**: a small web page (`http://<pi>:8080`) with a Scan button. Pure
@@ -21,6 +25,9 @@ into a network print and scan server for a USB **HP DeskJet 1515** (any DeskJet
 | `scripts/04-networkmanager-without-netplan.sh` | Moves network profiles from netplan to native NetworkManager keyfiles (big boot-time win) |
 | `scripts/05-wifi-only.sh` | Moves the fixed IP to Wi-Fi, turns Ethernet autoconnect off, auto-rollback |
 | `scripts/06-install-scanweb.sh` | Installs the scan web page as a systemd service |
+| `scripts/07-install-welcome.sh` | Installs the welcome page as a systemd service on port 80 |
+| `welcome/welcome.py` | The welcome/status page |
+| `welcome/welcome.service` | Its systemd unit (throwaway `DynamicUser`, only allowed to bind port 80) |
 | `scanweb/scanweb.py` | The scan web server |
 | `scanweb/scanweb.service` | Its systemd unit (runs as a restricted `scanweb` user) |
 | `config/config.txt.append` | Lines appended to `/boot/firmware/config.txt` |
@@ -39,6 +46,7 @@ sudo ./scripts/02-add-printer.sh           # add the DeskJet (PAPER=Letter to ov
 sudo ./scripts/03-tune-headless.sh         # optional: slim down a headless Pi
 sudo ./scripts/04-networkmanager-without-netplan.sh   # optional: faster boot on slow Pis
 sudo ./scripts/06-install-scanweb.sh       # scan web page
+sudo ./scripts/07-install-welcome.sh       # welcome / status page on port 80
 sudo reboot
 ```
 
@@ -53,6 +61,12 @@ Then reserve that IP for the Pi's Wi-Fi MAC address in your router's DHCP
 settings (or exclude it from the DHCP range), so nothing else gets the same address.
 
 ## Using it
+
+**Welcome page:** `http://<pi>/` is the starting point, with links to everything below.
+It shows whether the printer is ready, printing or switched off. CUPS alone can't tell
+switched off from idle for a USB printer, so the page also checks the USB bus. It also
+shows a red or amber banner if the Pi reports under-voltage, which means the power
+supply or cable is too weak. Status updates every 5 s; on a Pi 1 that costs about 0.1 s of CPU.
 
 **CUPS admin:** `http://<pi>:631`. Log in with the Pi user from `01-print-server.sh`.
 
@@ -108,6 +122,9 @@ Raspberry Pi OS trixie and HPLIP 3.22.10:
 - **hpaio sometimes returns one row fewer than the PNM header announces** (at
   600 dpi). The converter uses the rows actually received.
 - **"Device busy" for a few seconds after each scan.** The server retries.
+- **Under-voltage after adding a Wi-Fi adapter.** `vcgencmd get_throttled`
+  reported `0x50005` (under-voltage and throttling happening now). The welcome
+  page warns about this; the fix is a proper 5 V / 2.5 A supply and a short, thick cable.
 - **No idle down-clocking on a Pi 1.** `arm_freq_min` is ignored at the stock
   clock, so the CPU stays at 700 MHz. It still idles at about 40 °C.
 
@@ -121,8 +138,8 @@ Linux driver. The Pi 1's shared USB bus limits throughput to roughly
 
 ## Security notes
 
-- The CUPS sharing and the scan page are open to anyone on your LAN. Don't
-  expose ports 631/8080 to the internet.
+- The CUPS sharing, the scan page and the welcome page are open to anyone on your LAN. Don't
+  expose ports 80/631/8080 to the internet.
 - Change the Pi user's default password (`passwd`).
 - Never commit real `.nmconnection` files: they contain the Wi-Fi password
   (`.gitignore` blocks them).
