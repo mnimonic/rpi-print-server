@@ -19,7 +19,8 @@ be missing on other machines.
   no reservation, so the address may change; use `<hostname>.local`, not a hard-coded IP.
   Switched with `scripts/08-wifi-dhcp.sh`.
 - **No router-specific features.** The owner rejected using the router's `.lan` DNS names
-  (other users' routers differ). Addresses shown to users are the IP and `<hostname>.local`.
+  (other users' routers differ). QR codes and the info sheet use `<hostname>.local` (works on the
+  owner's Android); the IP is shown as a fallback.
 - **Printer queue uses the generic `usb://HP/Deskjet%201510%20series` URI.** Switching to the
   `hp:/usb/...?serial=` URI was attempted and the owner stopped it (printing already worked).
   Don't change it without asking.

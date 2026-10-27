@@ -88,8 +88,7 @@ sudo WIFI_PROFILE=wlan0-MyWifi ./scripts/08-wifi-dhcp.sh
 
 With DHCP the address can change, so refer to the Pi by its mDNS name
 (`http://<hostname>.local/`) and add printers on PCs by that name rather than the IP. The
-Bonjour and SSDP announcements follow the new address automatically. The QR codes contain
-the IP, so print a new info sheet if the address changes.
+Bonjour and SSDP announcements and the QR codes follow the new address automatically.
 
 ## Releasing and deploying changes
 
@@ -144,12 +143,12 @@ supply or cable is too weak. Status updates every 5 s; on a Pi 1 that costs abou
 |---|---|
 | Windows 10/11, macOS, iOS, Linux | `http://<hostname>.local/` (mDNS via Avahi) |
 | Windows File Explorer → Network | Appears as *Print & Scan Server (&lt;hostname&gt;)*; double-click opens the welcome page. Needs network discovery on (Private network profile). |
-| Android, or any phone | Scan the QR code on the welcome page, or on the printed info sheet (`http://<pi>/sheet`, "Print an info sheet") |
+| Any phone | Scan the QR code on the welcome page, or on the printed info sheet (`http://<pi>/sheet`, "Print an info sheet") |
 | Bonjour browser apps, Linux file managers | `_http._tcp` records "Print & Scan Server on &lt;hostname&gt;" and "Scanner on &lt;hostname&gt;" |
 
-The QR codes contain the IP address the viewer used, because `.local` names don't
-resolve on every Android phone; the `.local` name is listed next to them. This works
-the same with any router. SSDP and the QR encoder are built into `welcome.py`
+The QR codes contain the `<hostname>.local` name, so a printed sheet keeps working when
+DHCP gives the Pi a new address; the current IP is listed next to them as a fallback.
+Android resolves `.local` names since Android 12; on older phones type the IP instead. SSDP and the QR encoder are built into `welcome.py`
 (standard library only); the SSDP part answers searches on UDP 1900 and re-announces
 every 10 minutes.
 

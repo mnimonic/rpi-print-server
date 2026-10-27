@@ -156,3 +156,6 @@ passwords, Wi-Fi details, MAC addresses, serial numbers) are left out on purpose
   welcome page; the QR codes and info sheet use the IP again, with
   `<hostname>.local` listed next to them. The Windows "add printer" address on
   the info sheet uses the `.local` name, since the IP can change under DHCP.
+- Then the QR codes switched to `<hostname>.local` (the owner's Android resolves
+  it), with the IP as a fallback, so a printed sheet survives a DHCP address
+  change without depending on the router. Released as v1.3.0.

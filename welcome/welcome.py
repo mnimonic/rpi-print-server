@@ -685,8 +685,8 @@ a.button:hover { border-color: var(--accent); }
     <div>
       <p>Scan the code with a phone camera, or type one of these addresses:</p>
       <ul>
-        <li><a href="http://{{ip}}/">http://{{ip}}/</a></li>
-        <li><a href="http://{{local}}/">http://{{local}}/</a> <span>Windows, Mac, iPhone</span></li>
+        <li><a href="http://{{local}}/">http://{{local}}/</a></li>
+        <li><a href="http://{{ip}}/">http://{{ip}}/</a> <span>if the name doesn't open</span></li>
       </ul>
       <p>On Windows it also shows up in File Explorer under <em>Network</em>.</p>
       <a class="button" href="/sheet" target="_blank">Print an info sheet</a>
@@ -932,9 +932,9 @@ button { font: inherit; font-weight: 600; padding: 10px 22px; border: 0; border-
 <p class="sub">{{printer}} &middot; join the same Wi-Fi as the printer, then scan a code with your phone camera.</p>
 <div class="grid">
   <div class="box"><h2>Printer status &amp; help</h2>{{qr_home}}
-    <p class="url">http://{{ip}}/</p><p class="alt">http://{{local}}/</p></div>
+    <p class="url">http://{{local}}/</p><p class="alt">http://{{ip}}/</p></div>
   <div class="box"><h2>Scan a document</h2>{{qr_scan}}
-    <p class="url">http://{{ip}}:{{scanport}}/</p><p class="alt">http://{{local}}:{{scanport}}/</p></div>
+    <p class="url">http://{{local}}:{{scanport}}/</p><p class="alt">http://{{ip}}:{{scanport}}/</p></div>
 </div>
 <div class="help">
   <h2>Printing</h2>
@@ -978,11 +978,13 @@ class Handler(BaseHTTPRequestHandler):
         ip = self.connection.getsockname()[0]   # the address this client reached us on
         if path in ("/", "/sheet"):
             page = PAGE if path == "/" else SHEET
+            local = socket.gethostname() + ".local"
             for key, val in {"host": html.escape(socket.gethostname()), "printer": html.escape(PRINTER_NAME),
                              "queue": QUEUE, "scanport": str(SCANNER_PORT), "version": html.escape(VERSION),
-                             "ip": ip, "local": html.escape(socket.gethostname()) + ".local",
-                             "qr_home": qr_svg(f"http://{ip}/"),
-                             "qr_scan": qr_svg(f"http://{ip}:{SCANNER_PORT}/")}.items():
+                             "ip": ip, "local": html.escape(local),
+                             # QR codes use the mDNS name: it follows the Pi when DHCP changes its IP
+                             "qr_home": qr_svg(f"http://{local}/"),
+                             "qr_scan": qr_svg(f"http://{local}:{SCANNER_PORT}/")}.items():
                 page = page.replace("{{" + key + "}}", val)
             return self.send(200, page, "text/html; charset=utf-8")
         if path == "/api/status":
