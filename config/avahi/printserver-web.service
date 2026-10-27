@@ -1,0 +1,11 @@
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<!-- Bonjour/mDNS announcement of the welcome page (installed to /etc/avahi/services/) -->
+<service-group>
+  <name replace-wildcards="yes">Print &amp; Scan Server on %h</name>
+  <service>
+    <type>_http._tcp</type>
+    <port>80</port>
+    <txt-record>path=/</txt-record>
+  </service>
+</service-group>

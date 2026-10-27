@@ -14,6 +14,9 @@ into a network print and scan server for a USB **HP DeskJet 1515** (any DeskJet
   Python standard library, no extra packages.
 - **Lean and cool**: unneeded services disabled, headless boot config, no overclock.
 - **Wi-Fi only** (optional): fixed IP on Wi-Fi, Ethernet off.
+- **Easy to find**: `http://<hostname>.local/`, an entry in Windows File Explorer →
+  Network (SSDP/UPnP), Bonjour records for both pages, and QR codes plus a printable
+  info sheet for phones.
 
 ## Repository layout
 
@@ -26,6 +29,7 @@ into a network print and scan server for a USB **HP DeskJet 1515** (any DeskJet
 | `scripts/05-wifi-only.sh` | Moves the fixed IP to Wi-Fi, turns Ethernet autoconnect off, auto-rollback |
 | `scripts/06-install-scanweb.sh` | Installs the scan web page as a systemd service |
 | `scripts/07-install-welcome.sh` | Installs the welcome page as a systemd service on port 80 |
+| `scripts/08-advertise.sh` | Installs the Bonjour records and (re)installs the welcome page with SSDP and QR codes |
 | `welcome/welcome.py` | The welcome/status page |
 | `welcome/welcome.service` | Its systemd unit (throwaway `DynamicUser`, only allowed to bind port 80) |
 | `scanweb/scanweb.py` | The scan web server |
@@ -33,6 +37,7 @@ into a network print and scan server for a USB **HP DeskJet 1515** (any DeskJet
 | `config/config.txt.append` | Lines appended to `/boot/firmware/config.txt` |
 | `config/hdmi-off.service` | Turns HDMI output off at boot |
 | `config/wifi.nmconnection.example` | Template Wi-Fi profile with a fixed IP |
+| `config/avahi/printserver-*.service` | Bonjour (`_http._tcp`) records for the welcome and scan pages |
 
 ## Setup
 
@@ -47,6 +52,7 @@ sudo ./scripts/03-tune-headless.sh         # optional: slim down a headless Pi
 sudo ./scripts/04-networkmanager-without-netplan.sh   # optional: faster boot on slow Pis
 sudo ./scripts/06-install-scanweb.sh       # scan web page
 sudo ./scripts/07-install-welcome.sh       # welcome / status page on port 80
+sudo ./scripts/08-advertise.sh             # Bonjour records, SSDP, QR codes
 sudo reboot
 ```
 
@@ -59,6 +65,8 @@ sudo IP=192.168.1.50/24 GW=192.168.1.1 WIFI_PROFILE=wlan0-MyWifi ./scripts/05-wi
 
 Then reserve that IP for the Pi's Wi-Fi MAC address in your router's DHCP
 settings (or exclude it from the DHCP range), so nothing else gets the same address.
+Some routers (e.g. Cudy M3600 firmware 2.3.x) have no DHCP reservation; there, either
+pick a fixed IP *outside* the router's DHCP pool or shrink the pool so it excludes the Pi.
 
 ## Using it
 
@@ -67,6 +75,20 @@ It shows whether the printer is ready, printing or switched off. CUPS alone can'
 switched off from idle for a USB printer, so the page also checks the USB bus. It also
 shows a red or amber banner if the Pi reports under-voltage, which means the power
 supply or cable is too weak. Status updates every 5 s; on a Pi 1 that costs about 0.1 s of CPU.
+
+**Finding the server** from other devices:
+
+| Where | How |
+|---|---|
+| Windows 10/11, macOS, iOS, Linux | `http://<hostname>.local/` (mDNS via Avahi) |
+| Windows File Explorer → Network | Appears as *Print & Scan Server (&lt;hostname&gt;)*; double-click opens the welcome page. Needs network discovery on (Private network profile). |
+| Android, or any phone | Scan the QR code on the welcome page, or on the printed info sheet (`http://<pi>/sheet`, "Print an info sheet") |
+| Bonjour browser apps, Linux file managers | `_http._tcp` records "Print & Scan Server on &lt;hostname&gt;" and "Scanner on &lt;hostname&gt;" |
+
+The QR codes always contain the IP address the viewer used, because `.local` names
+don't resolve on every Android phone. SSDP and the QR encoder are built into `welcome.py`
+(standard library only); the SSDP part answers searches on UDP 1900 and re-announces
+every 10 minutes.
 
 **CUPS admin:** `http://<pi>:631`. Log in with the Pi user from `01-print-server.sh`.
 
@@ -153,7 +175,7 @@ supply, or the Pi will report under-voltage (see the welcome page).
 ## Security notes
 
 - The CUPS sharing, the scan page and the welcome page are open to anyone on your LAN. Don't
-  expose ports 80/631/8080 to the internet.
+  expose ports 80/631/8080 (or UDP 1900, SSDP) to the internet.
 - Change the Pi user's default password (`passwd`).
 - Never commit real `.nmconnection` files: they contain the Wi-Fi password
   (`.gitignore` blocks them).

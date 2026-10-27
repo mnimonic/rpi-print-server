@@ -105,3 +105,17 @@ passwords, Wi-Fi details, MAC addresses, serial numbers) are left out on purpose
   `throttled=0x0`, and 0 of 60 seconds with the under-voltage alarm under full
   CPU and Wi-Fi load. CPU speed was 700 MHz before and after; the gain is
   stability, not speed.
+
+## 10. Making the server easy to find
+
+- The owner asked for an easy way to find the server's address on Android, iOS,
+  Windows and Mac.
+- `<hostname>.local` already worked through Avahi (verified from Windows 11).
+- Added to `welcome.py` (stdlib only): an SSDP/UPnP responder, so the server shows
+  in Windows File Explorer → Network and double-clicking opens the welcome page;
+  a hand-written QR encoder; an "Open on another device" card; and `/sheet`, a
+  printable page with QR codes for the welcome and scan pages. The QR encoder was
+  verified with zxing-cpp across versions 1–10.
+- Added Avahi `_http._tcp` records for both pages (`config/avahi/`).
+- Router DHCP reservation: the router has no reservation feature (only static ARP
+  binding), so this is still open.

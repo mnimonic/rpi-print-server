@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Welcome page for the Raspberry Pi print server: printer status, links and hardware health.
-Read-only: it queries CUPS (lpstat), vcgencmd, /proc and /sys, and never changes anything."""
-import collections, html, json, os, platform, re, socket, subprocess, threading, time
+Read-only: it queries CUPS (lpstat), vcgencmd, /proc and /sys, and never changes anything.
+Also announces itself on the LAN via SSDP/UPnP (Windows File Explorer > Network) and shows
+QR codes plus a printable info sheet (/sheet) so phones can find the pages."""
+import collections, html, json, os, platform, re, socket, subprocess, threading, time, uuid
+from email.utils import formatdate
+from functools import lru_cache
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(os.environ.get("WELCOME_PORT", "80"))
@@ -277,6 +281,298 @@ def pi_status():
     }
 
 
+# ---------------------------------------------------------------- QR code
+# Minimal QR encoder (ISO/IEC 18004): byte mode, error correction level M, versions 1-10
+# (up to 213 bytes). Hand-written because the page uses only the standard library.
+
+# version -> (EC codewords per block, [(number of blocks, data codewords per block), ...])
+QR_M_BLOCKS = {
+    1: (10, [(1, 16)]), 2: (16, [(1, 28)]), 3: (26, [(1, 44)]), 4: (18, [(2, 32)]),
+    5: (24, [(2, 43)]), 6: (16, [(4, 27)]), 7: (18, [(4, 31)]), 8: (22, [(2, 38), (2, 39)]),
+    9: (22, [(3, 36), (2, 37)]), 10: (26, [(4, 43), (1, 44)]),
+}
+QR_MASKS = [
+    lambda x, y: (x + y) % 2 == 0, lambda x, y: y % 2 == 0, lambda x, y: x % 3 == 0,
+    lambda x, y: (x + y) % 3 == 0, lambda x, y: (x // 3 + y // 2) % 2 == 0,
+    lambda x, y: x * y % 2 + x * y % 3 == 0, lambda x, y: (x * y % 2 + x * y % 3) % 2 == 0,
+    lambda x, y: ((x + y) % 2 + x * y % 3) % 2 == 0,
+]
+
+
+def _gf_mul(x, y):
+    """Multiply in GF(256) with the QR polynomial x^8 + x^4 + x^3 + x^2 + 1."""
+    z = 0
+    for i in range(7, -1, -1):
+        z = (z << 1) ^ ((z >> 7) * 0x11D)
+        z ^= ((y >> i) & 1) * x
+    return z
+
+
+def _rs_divisor(degree):
+    result, root = [0] * (degree - 1) + [1], 1
+    for _ in range(degree):
+        for j in range(degree):
+            result[j] = _gf_mul(result[j], root)
+            if j + 1 < degree:
+                result[j] ^= result[j + 1]
+        root = _gf_mul(root, 2)
+    return result
+
+
+def _rs_remainder(data, divisor):
+    result = [0] * len(divisor)
+    for b in data:
+        factor = b ^ result.pop(0)
+        result.append(0)
+        for i, coef in enumerate(divisor):
+            result[i] ^= _gf_mul(coef, factor)
+    return result
+
+
+def _qr_alignment(ver):
+    if ver == 1:
+        return []
+    num = ver // 7 + 2
+    step = (ver * 8 + num * 3 + 5) // (num * 4 - 4) * 2
+    return sorted([ver * 4 + 10 - i * step for i in range(num - 1)] + [6])
+
+
+def _qr_format(mat, mask):
+    """Write both copies of the format bits (level M + mask); returns the cells used."""
+    size, rem = len(mat), mask   # level M = 00
+    for _ in range(10):
+        rem = (rem << 1) ^ ((rem >> 9) * 0x537)
+    bits = (mask << 10 | rem) ^ 0x5412
+    cells = ([(8, i) for i in range(6)] + [(8, 7), (8, 8), (7, 8)] + [(14 - i, 8) for i in range(9, 15)])
+    cells2 = [(size - 1 - i, 8) for i in range(8)] + [(8, size - 15 + i) for i in range(8, 15)]
+    for copy in (cells, cells2):
+        for i, (x, y) in enumerate(copy):
+            mat[y][x] = bool(bits >> i & 1)
+    mat[size - 8][8] = True   # the "dark module"
+    return cells + cells2 + [(8, size - 8)]
+
+
+def _qr_penalty(mat):
+    rows = ["".join("1" if v else "0" for v in r) for r in mat]
+    n, score = len(rows), 0
+    for line in rows + ["".join(r[i] for r in rows) for i in range(n)]:
+        score += sum(len(run) - 2 for run in re.findall(r"0{5,}|1{5,}", line))
+        score += 40 * len(re.findall(r"(?=10111010000|00001011101)", "0000" + line + "0000"))
+    for a, b in zip(rows, rows[1:]):
+        score += 3 * sum(1 for x in range(n - 1) if a[x] == a[x + 1] == b[x] == b[x + 1])
+    dark, total = sum(r.count("1") for r in rows), n * n
+    return score + 10 * ((abs(dark * 20 - total * 10) + total - 1) // total - 1)
+
+
+def qr_matrix(text):
+    """QR code for `text` as rows of booleans (True = dark), without the quiet zone."""
+    data = text.encode()
+    for ver, (ec_len, groups) in QR_M_BLOCKS.items():
+        capacity, cc_bits = sum(n * d for n, d in groups), 8 if ver < 10 else 16
+        if 4 + cc_bits + 8 * len(data) <= capacity * 8:
+            break
+    else:
+        raise ValueError("text too long for a QR code")
+    bits = "0100" + format(len(data), f"0{cc_bits}b") + "".join(format(b, "08b") for b in data)
+    bits += "0" * min(4, capacity * 8 - len(bits))
+    bits += "0" * (-len(bits) % 8)
+    words = [int(bits[i:i + 8], 2) for i in range(0, len(bits), 8)]
+    words += [(0xEC, 0x11)[i % 2] for i in range(capacity - len(words))]
+
+    blocks, pos, divisor = [], 0, _rs_divisor(ec_len)
+    for count, n in groups:
+        for _ in range(count):
+            blocks.append(words[pos:pos + n])
+            pos += n
+    ecs = [_rs_remainder(b, divisor) for b in blocks]
+    final = []
+    for i in range(max(len(b) for b in blocks)):
+        final += [b[i] for b in blocks if i < len(b)]
+    for i in range(ec_len):
+        final += [e[i] for e in ecs]
+
+    # Function patterns
+    size = ver * 4 + 17
+    mat = [[False] * size for _ in range(size)]
+    fn = [[False] * size for _ in range(size)]
+    def put(x, y, dark):
+        mat[y][x], fn[y][x] = dark, True
+    for i in range(size):
+        put(6, i, i % 2 == 0)
+        put(i, 6, i % 2 == 0)
+    for cx, cy in ((3, 3), (size - 4, 3), (3, size - 4)):
+        for dy in range(-4, 5):
+            for dx in range(-4, 5):
+                if 0 <= cx + dx < size and 0 <= cy + dy < size:
+                    put(cx + dx, cy + dy, max(abs(dx), abs(dy)) not in (2, 4))
+    align = _qr_alignment(ver)
+    last = len(align) - 1
+    for i, ax in enumerate(align):
+        for j, ay in enumerate(align):
+            if (i, j) not in ((0, 0), (0, last), (last, 0)):
+                for dy in range(-2, 3):
+                    for dx in range(-2, 3):
+                        put(ax + dx, ay + dy, max(abs(dx), abs(dy)) != 1)
+    for x, y in _qr_format(mat, 0):
+        fn[y][x] = True
+    if ver >= 7:
+        rem = ver
+        for _ in range(12):
+            rem = (rem << 1) ^ ((rem >> 11) * 0x1F25)
+        vbits = ver << 12 | rem
+        for i in range(18):
+            a, b, dark = size - 11 + i % 3, i // 3, bool(vbits >> i & 1)
+            put(a, b, dark)
+            put(b, a, dark)
+
+    # Data, in two-column zigzags from the bottom right, skipping the vertical timing column
+    i, right, nbits = 0, size - 1, len(final) * 8
+    while right >= 1:
+        if right == 6:
+            right = 5
+        for vert in range(size):
+            for x in (right, right - 1):
+                y = size - 1 - vert if (right + 1) & 2 == 0 else vert
+                if not fn[y][x] and i < nbits:
+                    mat[y][x] = bool(final[i >> 3] >> (7 - (i & 7)) & 1)
+                    i += 1
+        right -= 2
+
+    best = None
+    for mask, flip in enumerate(QR_MASKS):
+        t = [[v ^ (not fn[y][x] and flip(x, y)) for x, v in enumerate(row)] for y, row in enumerate(mat)]
+        _qr_format(t, mask)
+        score = _qr_penalty(t)
+        if best is None or score < best[0]:
+            best = (score, t)
+    return best[1]
+
+
+@lru_cache(maxsize=8)
+def qr_svg(text, quiet=4):
+    """QR code as inline SVG, black on white (also in dark mode, so phones can read it)."""
+    mat = qr_matrix(text)
+    n = len(mat) + 2 * quiet
+    path = []
+    for y, row in enumerate(mat):
+        for m in re.finditer(r"1+", "".join("1" if v else "0" for v in row)):
+            w = m.end() - m.start()
+            path.append(f"M{m.start() + quiet} {y + quiet}h{w}v1h-{w}z")
+    return (f'<svg class="qr" viewBox="0 0 {n} {n}" shape-rendering="crispEdges" role="img" '
+            f'aria-label="QR code for {html.escape(text)}"><rect width="{n}" height="{n}" fill="#fff"/>'
+            f'<path d="{"".join(path)}" fill="#000"/></svg>')
+
+
+# ---------------------------------------------------------------- network discovery (SSDP)
+# Windows lists UPnP devices in File Explorer > Network; double-clicking one opens its
+# presentationURL. Answering SSDP searches (and announcing now and then) is all it takes.
+
+SSDP_GROUP, SSDP_PORT = "239.255.255.250", 1900
+SSDP_MAX_AGE = 1800
+SSDP_NOTIFY_EVERY = 600
+DEVICE_TYPE = "urn:schemas-upnp-org:device:Basic:1"
+# Stable per Pi, without publishing the machine id itself
+DEVICE_UUID = str(uuid.uuid5(uuid.NAMESPACE_URL, "rpi-print-server:" + read("/etc/machine-id", socket.gethostname())))
+
+
+def local_ip_for(peer):
+    """Our address on the interface that reaches `peer` (connecting a UDP socket sends nothing)."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        try:
+            s.connect((peer, 9))
+            return s.getsockname()[0]
+        except OSError:
+            return ""
+
+
+def device_xml(ip):
+    name = html.escape(f"Print & Scan Server ({socket.gethostname()})")
+    return f"""<?xml version="1.0"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+<specVersion><major>1</major><minor>0</minor></specVersion>
+<URLBase>http://{ip}:{PORT}/</URLBase>
+<device>
+<deviceType>{DEVICE_TYPE}</deviceType>
+<friendlyName>{name}</friendlyName>
+<manufacturer>Raspberry Pi</manufacturer>
+<modelName>Print &amp; scan server</modelName>
+<modelDescription>{html.escape(PRINTER_NAME)} print and scan server</modelDescription>
+<modelNumber>1</modelNumber>
+<serialNumber>{DEVICE_UUID[:8]}</serialNumber>
+<UDN>uuid:{DEVICE_UUID}</UDN>
+<presentationURL>http://{ip}:{PORT}/</presentationURL>
+</device>
+</root>
+"""
+
+
+class SSDP(threading.Thread):
+    def __init__(self):
+        super().__init__(daemon=True)
+
+    @staticmethod
+    def targets(st):
+        u = f"uuid:{DEVICE_UUID}"
+        all_ = [("upnp:rootdevice", f"{u}::upnp:rootdevice"), (u, u), (DEVICE_TYPE, f"{u}::{DEVICE_TYPE}")]
+        return all_ if st == "ssdp:all" else [t for t in all_ if t[0] == st]
+
+    @staticmethod
+    def common(ip):
+        return (f"CACHE-CONTROL: max-age={SSDP_MAX_AGE}\r\nLOCATION: http://{ip}:{PORT}/upnp/device.xml\r\n"
+                f"SERVER: Linux/{platform.release()} UPnP/1.0 rpi-print-server/1.0\r\n")
+
+    def notify(self, sock):
+        ip = local_ip_for(SSDP_GROUP)
+        if not ip:
+            return
+        for nt, usn in self.targets("ssdp:all"):
+            msg = (f"NOTIFY * HTTP/1.1\r\nHOST: {SSDP_GROUP}:{SSDP_PORT}\r\n" + self.common(ip) +
+                   f"NT: {nt}\r\nNTS: ssdp:alive\r\nUSN: {usn}\r\n\r\n")
+            sock.sendto(msg.encode(), (SSDP_GROUP, SSDP_PORT))
+
+    def answer(self, sock, data, addr):
+        lines = data.decode("utf-8", "replace").split("\r\n")
+        if not lines[0].upper().startswith("M-SEARCH"):
+            return
+        hdr = {k.strip().upper(): v.strip() for k, _, v in (l.partition(":") for l in lines[1:]) if k}
+        if hdr.get("MAN", "").strip('"') != "ssdp:discover":
+            return
+        ip = local_ip_for(addr[0])
+        for st, usn in self.targets(hdr.get("ST", "")):
+            msg = ("HTTP/1.1 200 OK\r\n" + self.common(ip) +
+                   f"DATE: {formatdate(usegmt=True)}\r\nEXT:\r\nST: {st}\r\nUSN: {usn}\r\n\r\n")
+            sock.sendto(msg.encode(), addr)
+
+    def serve(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(("", SSDP_PORT))
+            # Fails (and is retried) while the network is still down at boot
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP,
+                            socket.inet_aton(SSDP_GROUP) + socket.inet_aton("0.0.0.0"))
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+            sock.settimeout(SSDP_NOTIFY_EVERY)
+            self.notify(sock)
+            last = time.time()
+            while True:
+                try:
+                    data, addr = sock.recvfrom(2048)
+                    self.answer(sock, data, addr)
+                except socket.timeout:
+                    pass
+                if time.time() - last >= SSDP_NOTIFY_EVERY:
+                    self.notify(sock)
+                    last = time.time()
+
+    def run(self):
+        while True:
+            try:
+                self.serve()
+            except Exception as e:   # network down, interface changed, ...: try again
+                print(f"ssdp: {e!r}", flush=True)
+            time.sleep(30)
+
+
 # ---------------------------------------------------------------- page
 
 PAGE = r"""<!doctype html>
@@ -343,6 +639,17 @@ details summary { cursor: pointer; font-weight: 600; }
 details p { color: var(--muted); font-size: .92rem; line-height: 1.5; }
 code { background: var(--chip); padding: 2px 6px; border-radius: 6px; font-size: .85rem; word-break: break-all; }
 footer { color: var(--muted); font-size: .8rem; text-align: center; margin-top: 8px; }
+.find { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
+.find svg.qr { width: 150px; height: 150px; flex: none; border-radius: 8px; }
+.find > div { flex: 1; min-width: 220px; }
+.find p { margin: 0 0 8px; color: var(--muted); font-size: .92rem; line-height: 1.45; }
+.find ul { margin: 0 0 10px; padding: 0; list-style: none; }
+.find li { padding: 3px 0; }
+.find li a { color: var(--accent); font-weight: 600; overflow-wrap: anywhere; }
+.find li span { color: var(--muted); font-size: .85rem; }
+a.button { display: inline-block; padding: 9px 16px; border-radius: 10px; border: 1px solid var(--border);
+           color: var(--text); text-decoration: none; font-weight: 600; font-size: .92rem; }
+a.button:hover { border-color: var(--accent); }
 </style></head><body><main>
 <header>
   <h1>Print &amp; scan server</h1>
@@ -365,6 +672,22 @@ footer { color: var(--muted); font-size: .8rem; text-align: center; margin-top: 
     <a class="action primary" id="l-scan" href="#"><strong>Scan a document</strong><span>Scan to PDF, JPEG or PNG</span></a>
     <a class="action" id="l-queue" href="#"><strong>Print queue</strong><span>Jobs, test page, pause/resume</span></a>
     <a class="action" id="l-cups" href="#"><strong>Printer admin</strong><span>CUPS settings</span></a>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Open on another device</h2>
+  <div class="find">
+    {{qr_home}}
+    <div>
+      <p>Scan the code with a phone camera, or type one of these addresses:</p>
+      <ul>
+        <li><a href="http://{{ip}}/">http://{{ip}}/</a></li>
+        <li><a href="http://{{local}}/">http://{{local}}/</a> <span>Windows, Mac, iPhone</span></li>
+      </ul>
+      <p>On Windows it also shows up in File Explorer under <em>Network</em>.</p>
+      <a class="button" href="/sheet" target="_blank">Print an info sheet</a>
+    </div>
   </div>
 </section>
 
@@ -577,6 +900,48 @@ refresh();
 setInterval(refresh, 5000);
 </script></body></html>"""
 
+# Printable one-pager to stick on the printer: QR codes and addresses for both pages
+SHEET = r"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Print Server Sheet</title>
+<style>
+@page { margin: 15mm; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #fff; color: #000; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 720px; margin: 0 auto; padding: 24px 16px; }
+h1 { font-size: 1.9rem; margin: 0 0 4px; }
+.sub { color: #444; margin: 0 0 22px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
+.box { border: 2px solid #000; border-radius: 14px; padding: 16px; text-align: center; break-inside: avoid; }
+.box h2 { font-size: 1.3rem; margin: 0; }
+.box svg.qr { width: 200px; height: 200px; display: block; margin: 8px auto; }
+.url { font-family: ui-monospace, Consolas, monospace; font-weight: 700; font-size: 1.05rem; overflow-wrap: anywhere; margin: 2px 0; }
+.alt { font-family: ui-monospace, Consolas, monospace; color: #444; font-size: .92rem; overflow-wrap: anywhere; margin: 2px 0; }
+.help { margin-top: 22px; line-height: 1.5; }
+.help h2 { font-size: 1.15rem; margin: 0 0 6px; }
+.help p { margin: 0 0 8px; }
+.noprint { text-align: center; margin-top: 24px; }
+button { font: inherit; font-weight: 600; padding: 10px 22px; border: 0; border-radius: 10px; background: #1a73e8; color: #fff; cursor: pointer; }
+@media print { .noprint { display: none; } main { padding: 0; } }
+</style></head><body><main>
+<h1>Print &amp; scan server</h1>
+<p class="sub">{{printer}} &middot; join the same Wi-Fi as the printer, then scan a code with your phone camera.</p>
+<div class="grid">
+  <div class="box"><h2>Printer status &amp; help</h2>{{qr_home}}
+    <p class="url">http://{{ip}}/</p><p class="alt">http://{{local}}/</p></div>
+  <div class="box"><h2>Scan a document</h2>{{qr_scan}}
+    <p class="url">http://{{ip}}:{{scanport}}/</p><p class="alt">http://{{local}}:{{scanport}}/</p></div>
+</div>
+<div class="help">
+  <h2>Printing</h2>
+  <p><strong>iPhone, iPad, Mac, Android:</strong> nothing to install, the printer is offered automatically when you print.</p>
+  <p><strong>Windows 11:</strong> Settings &rarr; Bluetooth &amp; devices &rarr; Printers &amp; scanners &rarr; Add device.
+     If it isn't listed, add it by address: <span class="url">http://{{ip}}:631/printers/{{queue}}</span></p>
+</div>
+<p class="noprint"><button onclick="window.print()">Print this sheet</button></p>
+</main></body></html>"""
+
 
 _status_cache = {"t": 0, "json": ""}
 _status_lock = threading.Lock()
@@ -607,18 +972,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
-        if path == "/":
-            page = PAGE
+        ip = self.connection.getsockname()[0]   # the address this client reached us on
+        if path in ("/", "/sheet"):
+            page = PAGE if path == "/" else SHEET
             for key, val in {"host": html.escape(socket.gethostname()), "printer": html.escape(PRINTER_NAME),
-                             "queue": QUEUE, "scanport": str(SCANNER_PORT)}.items():
+                             "queue": QUEUE, "scanport": str(SCANNER_PORT), "ip": ip,
+                             "local": html.escape(socket.gethostname()) + ".local",
+                             "qr_home": qr_svg(f"http://{ip}/"),
+                             "qr_scan": qr_svg(f"http://{ip}:{SCANNER_PORT}/")}.items():
                 page = page.replace("{{" + key + "}}", val)
             return self.send(200, page, "text/html; charset=utf-8")
         if path == "/api/status":
             return self.send(200, status_json(), "application/json")
+        if path == "/upnp/device.xml":
+            return self.send(200, device_xml(ip), 'text/xml; charset="utf-8"')
         self.send(404, "Not found", "text/plain; charset=utf-8")
 
 
 if __name__ == "__main__":
     sampler.start()
+    SSDP().start()
     print(f"Welcome page on port {PORT}", flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

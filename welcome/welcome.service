@@ -3,7 +3,7 @@ Description=Welcome page for the print server (printer status and links)
 After=network-online.target cups.service
 
 [Service]
-# Throwaway system user; only needs to bind port 80, run lpstat, read /sys,
+# Throwaway system user; only needs to bind port 80 (and UDP 1900 for SSDP), run lpstat, read /sys,
 # and query the firmware via vcgencmd (/dev/vchiq is group "video")
 DynamicUser=yes
 SupplementaryGroups=video

@@ -56,8 +56,9 @@ be missing on other machines.
 |---|---|---|---|
 | `cups` | 631 | root | distro (forced into `multi-user.target`) |
 | `scanweb` | 8080 | `scanweb` (groups lp, scanner) | `scanweb/scanweb.py` |
-| `welcome` | 80 | `DynamicUser` + CAP_NET_BIND_SERVICE, group video | `welcome/welcome.py` |
+| `welcome` | 80, UDP 1900 (SSDP) | `DynamicUser` + CAP_NET_BIND_SERVICE, group video | `welcome/welcome.py` |
 | `hdmi-off` | – | oneshot | `config/hdmi-off.service` |
+| `avahi-daemon` | 5353 | distro | + `config/avahi/printserver-*.service` in `/etc/avahi/services/` |
 
 ## Gotchas (beyond the README list)
 
@@ -73,13 +74,19 @@ be missing on other machines.
 - In the scan code, `jpeg_to_pdf`/`pbm_to_pdf`/`pbm_to_png` are hand-written encoders
   (stdlib only) because `scanimage`'s PDF/PNG writers are broken. They were verified
   round-trip; keep them that way.
+- `welcome.py` has a hand-written QR encoder (byte mode, level M, versions 1–10). It was
+  verified by decoding 22 strings across all ten versions with zxing-cpp on the dev PC.
+  Re-check the same way after any change.
+- The Windows dev PC owns UDP 1900 (its SSDP service), so test SSDP against the Pi with
+  an M-SEARCH from an ephemeral port, not by running the responder locally.
 - Tests that need the scanner: there is a Windows test page on the glass, which works well
   as a reference image.
 
 ## Open items
 
 - Change the Pi user's password from its weak initial value; set up SSH keys.
-- Router: reserve the Pi's fixed IP for its Wi-Fi MAC (or exclude it from the DHCP pool).
+- Router: the Pi's fixed IP is inside the router's DHCP pool, and the router (Cudy, see
+  `CLAUDE.local.md`) has no DHCP reservation feature. Decide: shrink the pool or move the Pi's IP.
 - Optional: Ethernet as an emergency fallback when Wi-Fi is down (offered, not done).
 - Optional: ink levels on the welcome page (needs the `hp:` backend; see preferences).
 - Optional: a LICENSE file (none chosen yet).
