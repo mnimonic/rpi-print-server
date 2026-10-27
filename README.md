@@ -86,13 +86,10 @@ a fixed IP *outside* the router's DHCP pool, or let DHCP assign the address:
 sudo WIFI_PROFILE=wlan0-MyWifi ./scripts/08-wifi-dhcp.sh
 ```
 
-With DHCP, many routers (OpenWrt-based ones such as Cudy, and most dnsmasq routers) give
-the Pi a DNS name such as `rasp-printer.lan`. That name works on every device, Android
-included, and keeps working if the address changes. Add printers on PCs by name, not by IP.
-This only works if the router hands out *itself* as the DNS server. If its DHCP settings
-give clients public DNS servers (e.g. 1.1.1.1 / 8.8.8.8), clients never ask the router, and
-`.lan` names don't resolve. Clear those fields, and set the public servers as the router's
-upstream DNS instead.
+With DHCP the address can change, so refer to the Pi by its mDNS name
+(`http://<hostname>.local/`) and add printers on PCs by that name rather than the IP. The
+Bonjour and SSDP announcements follow the new address automatically. The QR codes contain
+the IP, so print a new info sheet if the address changes.
 
 ## Releasing and deploying changes
 
@@ -150,10 +147,9 @@ supply or cable is too weak. Status updates every 5 s; on a Pi 1 that costs abou
 | Android, or any phone | Scan the QR code on the welcome page, or on the printed info sheet (`http://<pi>/sheet`, "Print an info sheet") |
 | Bonjour browser apps, Linux file managers | `_http._tcp` records "Print & Scan Server on &lt;hostname&gt;" and "Scanner on &lt;hostname&gt;" |
 
-The QR codes and the info sheet use the router's DNS name for the Pi when there is one
-(found by a reverse lookup, e.g. `rasp-printer.lan`), so a printed sheet keeps working
-if the DHCP address changes. Otherwise they use the IP address, because `.local` names
-don't resolve on every Android phone. SSDP and the QR encoder are built into `welcome.py`
+The QR codes contain the IP address the viewer used, because `.local` names don't
+resolve on every Android phone; the `.local` name is listed next to them. This works
+the same with any router. SSDP and the QR encoder are built into `welcome.py`
 (standard library only); the SSDP part answers searches on UDP 1900 and re-announces
 every 10 minutes.
 

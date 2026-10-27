@@ -488,27 +488,6 @@ def local_ip_for(peer):
             return ""
 
 
-_names = {}
-
-
-def lan_name(ip):
-    """The name the router's DNS gives us (e.g. rasp-printer.lan), or None. Cached for 5 min.
-    A name survives the DHCP address changing, so QR codes and the info sheet prefer it."""
-    hit = _names.get(ip)
-    if hit and time.time() - hit[0] < 300:
-        return hit[1]
-    name = None
-    try:
-        host = socket.gethostbyaddr(ip)[0].rstrip(".")
-        # Only names that other devices can resolve back to us (no .local, no localhost)
-        if "." in host and not host.endswith(".local") and socket.gethostbyname(host) == ip:
-            name = host
-    except OSError:
-        pass
-    _names[ip] = (time.time(), name)
-    return name
-
-
 def device_xml(ip):
     name = html.escape(f"Print & Scan Server ({socket.gethostname()})")
     return f"""<?xml version="1.0"?>
@@ -705,7 +684,10 @@ a.button:hover { border-color: var(--accent); }
     {{qr_home}}
     <div>
       <p>Scan the code with a phone camera, or type one of these addresses:</p>
-      <ul>{{home_links}}</ul>
+      <ul>
+        <li><a href="http://{{ip}}/">http://{{ip}}/</a></li>
+        <li><a href="http://{{local}}/">http://{{local}}/</a> <span>Windows, Mac, iPhone</span></li>
+      </ul>
       <p>On Windows it also shows up in File Explorer under <em>Network</em>.</p>
       <a class="button" href="/sheet" target="_blank">Print an info sheet</a>
     </div>
@@ -950,15 +932,15 @@ button { font: inherit; font-weight: 600; padding: 10px 22px; border: 0; border-
 <p class="sub">{{printer}} &middot; join the same Wi-Fi as the printer, then scan a code with your phone camera.</p>
 <div class="grid">
   <div class="box"><h2>Printer status &amp; help</h2>{{qr_home}}
-    <p class="url">http://{{addr}}/</p>{{home_alt}}</div>
+    <p class="url">http://{{ip}}/</p><p class="alt">http://{{local}}/</p></div>
   <div class="box"><h2>Scan a document</h2>{{qr_scan}}
-    <p class="url">http://{{addr}}:{{scanport}}/</p>{{scan_alt}}</div>
+    <p class="url">http://{{ip}}:{{scanport}}/</p><p class="alt">http://{{local}}:{{scanport}}/</p></div>
 </div>
 <div class="help">
   <h2>Printing</h2>
   <p><strong>iPhone, iPad, Mac, Android:</strong> nothing to install, the printer is offered automatically when you print.</p>
   <p><strong>Windows 11:</strong> Settings &rarr; Bluetooth &amp; devices &rarr; Printers &amp; scanners &rarr; Add device.
-     If it isn't listed, add it by address: <span class="url">http://{{addr}}:631/printers/{{queue}}</span></p>
+     If it isn't listed, add it by address: <span class="url">http://{{local}}:631/printers/{{queue}}</span></p>
 </div>
 <p class="noprint"><button onclick="window.print()">Print this sheet</button></p>
 </main></body></html>"""
@@ -996,22 +978,11 @@ class Handler(BaseHTTPRequestHandler):
         ip = self.connection.getsockname()[0]   # the address this client reached us on
         if path in ("/", "/sheet"):
             page = PAGE if path == "/" else SHEET
-            # Preferred address: the router's DNS name (works on every device, survives a new
-            # DHCP address), then the IP, then the mDNS name (not on every Android phone)
-            local = socket.gethostname() + ".local"
-            addr = lan_name(ip) or ip
-            others = [ip] if addr != ip else []
-            home_links = "".join(f'<li><a href="http://{html.escape(a)}/">http://{html.escape(a)}/</a>{note}</li>'
-                                 for a, note in [(addr, ""), *[(o, "") for o in others],
-                                                 (local, " <span>Windows, Mac, iPhone</span>")])
-            def alt(port):
-                return "".join(f'<p class="alt">http://{html.escape(a)}{port}/</p>' for a in [*others, local])
             for key, val in {"host": html.escape(socket.gethostname()), "printer": html.escape(PRINTER_NAME),
                              "queue": QUEUE, "scanport": str(SCANNER_PORT), "version": html.escape(VERSION),
-                             "addr": html.escape(addr), "home_links": home_links,
-                             "home_alt": alt(""), "scan_alt": alt(f":{SCANNER_PORT}"),
-                             "qr_home": qr_svg(f"http://{addr}/"),
-                             "qr_scan": qr_svg(f"http://{addr}:{SCANNER_PORT}/")}.items():
+                             "ip": ip, "local": html.escape(socket.gethostname()) + ".local",
+                             "qr_home": qr_svg(f"http://{ip}/"),
+                             "qr_scan": qr_svg(f"http://{ip}:{SCANNER_PORT}/")}.items():
                 page = page.replace("{{" + key + "}}", val)
             return self.send(200, page, "text/html; charset=utf-8")
         if path == "/api/status":

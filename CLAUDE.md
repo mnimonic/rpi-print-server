@@ -16,8 +16,10 @@ be missing on other machines.
   The web pages use only the Python standard library.
 - **Wi-Fi only.** Ethernet autoconnect is off on purpose.
 - **wlan0 uses DHCP** (since 2026-10-27, owner's choice: "let dhcp do its job"). The router has
-  no reservation, so the address may change; use the name `<hostname>.lan` (router DNS) or
-  `<hostname>.local`, not a hard-coded IP. Switched with `scripts/08-wifi-dhcp.sh`.
+  no reservation, so the address may change; use `<hostname>.local`, not a hard-coded IP.
+  Switched with `scripts/08-wifi-dhcp.sh`.
+- **No router-specific features.** The owner rejected using the router's `.lan` DNS names
+  (other users' routers differ). Addresses shown to users are the IP and `<hostname>.local`.
 - **Printer queue uses the generic `usb://HP/Deskjet%201510%20series` URI.** Switching to the
   `hp:/usb/...?serial=` URI was attempted and the owner stopped it (printing already worked).
   Don't change it without asking.

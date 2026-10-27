@@ -1,15 +1,14 @@
 #!/bin/bash
 # Switch the Wi-Fi profile from a fixed IP to DHCP, with automatic rollback.
 #
-# With DHCP the router's DNS knows the Pi by name (e.g. rasp-printer.lan on many routers),
-# which works on every device including Android. Use this when the router can't reserve
-# an address. Everything else follows the Pi by name: <hostname>.local, the Windows
-# Network entry (SSDP), the printer on phones (Bonjour) and the welcome page QR codes.
+# Use this when the router can't reserve an address for the Pi. The address may then
+# change, but <hostname>.local, the Windows Network entry (SSDP) and the printer on phones
+# (Bonjour) all follow it. The welcome page QR codes show the current IP.
 #
 # Usage (as root):  sudo WIFI_PROFILE=wlan0-MyWifi ./08-wifi-dhcp.sh
 #
 # Runs detached, because the SSH session drops when the address changes.
-# Afterwards find the Pi at http://<hostname>.lan/ or http://<hostname>.local/.
+# Afterwards find the Pi at http://<hostname>.local/.
 # Log: /root/wifi-dhcp.log
 set -euo pipefail
 : "${WIFI_PROFILE:?set WIFI_PROFILE (file name without .nmconnection)}"
@@ -17,7 +16,7 @@ set -euo pipefail
 if [ -z "${DETACHED:-}" ]; then
   DETACHED=1 WIFI_PROFILE="$WIFI_PROFILE" setsid nohup "$0" >/dev/null 2>&1 < /dev/null &
   echo "Switching to DHCP in the background; the Pi will be back in ~30 s at"
-  echo "http://$(hostname).local/ (or http://$(hostname).lan/ on many routers)."
+  echo "http://$(hostname).local/"
   exit 0
 fi
 
@@ -40,7 +39,7 @@ for k in [k for k in ipv4 if k.startswith(("address", "gateway", "dns"))]:
     del ipv4[k]          # use the router's address, gateway and DNS
 ipv4["method"] = "auto"
 ipv4["dhcp-send-hostname"] = "true"
-ipv4["dhcp-hostname"] = host   # the name the router's DNS will know us by
+ipv4["dhcp-hostname"] = host   # shows up by name in the router's client list
 with open(path, "w") as f:
     c.write(f, space_around_delimiters=False)
 PY

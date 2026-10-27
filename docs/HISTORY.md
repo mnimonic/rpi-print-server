@@ -148,3 +148,11 @@ passwords, Wi-Fi details, MAC addresses, serial numbers) are left out on purpose
   `VERSION`) and tags the commit. `deploy.sh` now only uploads a package and
   runs its installer; the installer moved out of a heredoc into
   `scripts/install-release.sh`.
+
+## 14. Back to IP and .local
+
+- The owner didn't want the `.lan` approach: it depends on the router's DNS
+  setup, which other users won't share. The reverse lookup was removed from the
+  welcome page; the QR codes and info sheet use the IP again, with
+  `<hostname>.local` listed next to them. The Windows "add printer" address on
+  the info sheet uses the `.local` name, since the IP can change under DHCP.
