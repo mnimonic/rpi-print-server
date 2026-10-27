@@ -1,0 +1,12 @@
+# Never commit real network profiles (they contain Wi-Fi passwords)
+*.nmconnection
+!*.nmconnection.example
+
+# Scan output / test files
+*.pdf
+*.png
+*.jpg
+*.pnm
+
+__pycache__/
+*.pyc

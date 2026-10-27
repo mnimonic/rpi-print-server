@@ -1,0 +1,128 @@
+# Raspberry Pi print & scan server
+
+Turns an old Raspberry Pi (tested on a **Pi 1 Model B+**, Raspberry Pi OS 13 "trixie")
+into a network print and scan server for a USB **HP DeskJet 1515** (any DeskJet
+1510-series model should work).
+
+- **Printing**: CUPS + HPLIP, shared on the LAN and discoverable by Windows, macOS,
+  iOS and Android (Avahi/IPP).
+- **Scanning**: a small web page (`http://<pi>:8080`) with a Scan button. Pure
+  Python standard library, no extra packages.
+- **Lean and cool**: unneeded services disabled, headless boot config, no overclock.
+- **Wi-Fi only** (optional): fixed IP on Wi-Fi, Ethernet off.
+
+## Repository layout
+
+| Path | What it is |
+|---|---|
+| `scripts/01-print-server.sh` | Installs CUPS, HPLIP, SANE, Avahi; enables sharing and the CUPS web UI |
+| `scripts/02-add-printer.sh` | Adds and shares the DeskJet queue (A4, retry on error) |
+| `scripts/03-tune-headless.sh` | Disables unneeded services, headless `config.txt`, HDMI off |
+| `scripts/04-networkmanager-without-netplan.sh` | Moves network profiles from netplan to native NetworkManager keyfiles (big boot-time win) |
+| `scripts/05-wifi-only.sh` | Moves the fixed IP to Wi-Fi, turns Ethernet autoconnect off, auto-rollback |
+| `scripts/06-install-scanweb.sh` | Installs the scan web page as a systemd service |
+| `scanweb/scanweb.py` | The scan web server |
+| `scanweb/scanweb.service` | Its systemd unit (runs as a restricted `scanweb` user) |
+| `config/config.txt.append` | Lines appended to `/boot/firmware/config.txt` |
+| `config/hdmi-off.service` | Turns HDMI output off at boot |
+| `config/wifi.nmconnection.example` | Template Wi-Fi profile with a fixed IP |
+
+## Setup
+
+Copy the repository to the Pi (e.g. `git clone` or `scp -r`), then:
+
+```bash
+cd rpi-print-server
+chmod +x scripts/*.sh
+sudo ./scripts/01-print-server.sh          # CUPS + HP drivers + sharing
+sudo ./scripts/02-add-printer.sh           # add the DeskJet (PAPER=Letter to override A4)
+sudo ./scripts/03-tune-headless.sh         # optional: slim down a headless Pi
+sudo ./scripts/04-networkmanager-without-netplan.sh   # optional: faster boot on slow Pis
+sudo ./scripts/06-install-scanweb.sh       # scan web page
+sudo reboot
+```
+
+Optional, to run on Wi-Fi only (do this while still connected by Ethernet):
+
+```bash
+ls /etc/NetworkManager/system-connections/       # find your Wi-Fi profile name
+sudo IP=192.168.1.50/24 GW=192.168.1.1 WIFI_PROFILE=wlan0-MyWifi ./scripts/05-wifi-only.sh
+```
+
+Then reserve that IP for the Pi's Wi-Fi MAC address in your router's DHCP
+settings (or exclude it from the DHCP range), so nothing else gets the same address.
+
+## Using it
+
+**CUPS admin:** `http://<pi>:631`. Log in with the Pi user from `01-print-server.sh`.
+
+**Add the printer on Windows 11** (admin PowerShell):
+
+```powershell
+Add-Printer -IppURL "http://<pi>:631/printers/DeskJet_1515" -Name "HP DeskJet 1515 (Pi)"
+```
+
+Or go to Settings → Printers & scanners → Add device → *Add manually* → *Select a
+shared printer by name* → `http://<pi>:631/printers/DeskJet_1515`, and choose the
+**Microsoft IPP Class Driver**. No HP software is needed on the PC. macOS, iOS and
+Android find it automatically.
+
+**Scanning:** open `http://<pi>:8080`, place the page face-down in the top-left
+corner of the glass, choose the settings and press **Scan**. The file downloads
+when done. Selections are remembered in a cookie.
+
+| Colour option | How it is produced | Best for |
+|---|---|---|
+| Colour | Scanner colour mode (JPEG transfer) | Photos, colour documents |
+| Greyscale | Scanner grey mode | Documents with shading |
+| Black & white (smallest files) | Scanner's own Lineart mode | Plain black text at ≥200 dpi |
+| Black & white – enhanced | Greyscale scan, thresholded on the Pi | Most documents; keeps light-grey text, readable even at 75 dpi |
+
+Resolutions: 75–600 dpi. 1200+ dpi colour would exhaust the Pi 1's RAM. Output
+can be PDF, JPEG or PNG; for black & white, JPEG is replaced by PNG. On a Pi 1
+a page takes about 25–30 s at 200 dpi and about 100 s at 600 dpi, mostly scanner time.
+
+## Problems found and how they're handled
+
+These are the non-obvious issues hit while building this on a Pi 1 with
+Raspberry Pi OS trixie and HPLIP 3.22.10:
+
+- **CUPS didn't start at boot without the printer.** `cups.service` is only
+  wanted by `printer.target`, which starts when a USB printer is detected.
+  Fix: `systemctl add-wants multi-user.target cups.service`.
+- **CUPS web UI disabled by default** (`WebInterface No`). Fix: `cupsctl WebInterface=yes`.
+- **4-minute boot.** NetworkManager's netplan integration re-runs
+  `netplan generate` several times at boot (~30 s each on a Pi 1). Moving the
+  profiles to native keyfiles brought boot to under 2 min. Edit keyfiles
+  directly; `nmcli connection modify` writes back to `/etc/netplan`.
+- **SSH over Wi-Fi failed while Ethernet was also connected**: both were on the
+  same subnet, so replies left through eth0. Use one interface (see `05-wifi-only.sh`).
+- **`scanimage --format=pdf` writes broken PDFs**: the image stream `/Length`
+  and the xref table are all `0`, so most viewers show a blank page. The scan
+  server scans JPEG/PNM and builds the PDF itself.
+- **Lineart (black & white) through `scanimage`'s PDF/PNG writers fails**
+  ("Application transferred too few scanlines" / "No IDATs written"); only raw
+  PNM output works. The server scans PNM and encodes PDF/PNG itself (zlib).
+- **The scanner's Lineart cut-off drops light-grey text** and is unreadable at
+  75 dpi. "Black & white – enhanced" scans greyscale and thresholds at 200/255.
+- **hpaio sometimes returns one row fewer than the PNM header announces** (at
+  600 dpi). The converter uses the rows actually received.
+- **"Device busy" for a few seconds after each scan.** The server retries.
+- **No idle down-clocking on a Pi 1.** `arm_freq_min` is ignored at the stock
+  clock, so the CPU stays at 700 MHz. It still idles at about 40 °C.
+
+## Wi-Fi adapters
+
+A Pi 1 has no Wi-Fi. Adapters with in-kernel drivers work with no extra
+installs, e.g. **TP-Link TL-WN823N** (RTL8192EU, tested) or **TL-WN725N**
+(RTL8188EUS). Avoid "driver-free"/AIC8800 adapters, which have no mainline
+Linux driver. The Pi 1's shared USB bus limits throughput to roughly
+20–30 Mbps, which is plenty for printing.
+
+## Security notes
+
+- The CUPS sharing and the scan page are open to anyone on your LAN. Don't
+  expose ports 631/8080 to the internet.
+- Change the Pi user's default password (`passwd`).
+- Never commit real `.nmconnection` files: they contain the Wi-Fi password
+  (`.gitignore` blocks them).

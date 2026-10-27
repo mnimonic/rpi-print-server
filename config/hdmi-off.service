@@ -1,0 +1,9 @@
+[Unit]
+Description=Turn off HDMI output (headless)
+
+[Service]
+Type=oneshot
+ExecStart=-/usr/bin/vcgencmd display_power 0
+
+[Install]
+WantedBy=multi-user.target

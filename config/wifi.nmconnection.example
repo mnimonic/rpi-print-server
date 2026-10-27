@@ -1,0 +1,31 @@
+# Example NetworkManager profile for a Wi-Fi-only print server.
+# Copy to /etc/NetworkManager/system-connections/<name>.nmconnection,
+# fill in your values, then:
+#   sudo chmod 600 /etc/NetworkManager/system-connections/<name>.nmconnection
+#   sudo nmcli connection reload && sudo nmcli connection up wifi
+# (Comments are allowed in keyfiles; remove them if you prefer.)
+
+[connection]
+id=wifi
+type=wifi
+autoconnect=true
+autoconnect-priority=10
+
+[wifi]
+ssid=YOUR_WIFI_NAME
+mode=infrastructure
+# 2 = Wi-Fi power saving off; otherwise a server can miss incoming connections
+powersave=2
+
+[wifi-security]
+key-mgmt=wpa-psk
+psk=YOUR_WIFI_PASSWORD
+
+[ipv4]
+method=manual
+# <pi address>/<prefix>,<router>
+address1=192.168.1.50/24,192.168.1.1
+dns=1.1.1.1;192.168.1.1;
+
+[ipv6]
+method=ignore

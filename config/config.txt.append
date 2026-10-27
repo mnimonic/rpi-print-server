@@ -1,0 +1,6 @@
+# --- printserver tuning ---
+# Headless: minimum GPU memory (more RAM for CUPS)
+gpu_mem=16
+# Stock 700 MHz clock, no overclock.
+# (A Pi 1 ignores arm_freq_min unless overclocked, so it can't idle lower.)
+force_turbo=0
