@@ -1,5 +1,5 @@
 #!/bin/bash
-# Move network profiles from netplan to native NetworkManager keyfiles.
+# Setup step 4: move network profiles from netplan to native NetworkManager keyfiles.
 #
 # On Raspberry Pi OS (trixie) NetworkManager re-runs `netplan generate` several
 # times during boot; on a Pi 1 each run takes ~30 s, which made boot take ~4 min.
@@ -10,7 +10,7 @@
 # `nmcli connection reload` -- `nmcli connection modify` would write the
 # profile back into /etc/netplan and bring the slowdown back.
 #
-# Run on the Pi as root:  sudo ./04-networkmanager-without-netplan.sh
+# Run on the Pi as root:  sudo ./install/04-networkmanager-without-netplan.sh
 set -euo pipefail
 SRC=/run/NetworkManager/system-connections
 DST=/etc/NetworkManager/system-connections

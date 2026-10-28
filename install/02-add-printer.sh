@@ -1,6 +1,6 @@
 #!/bin/bash
-# Add and share an HP DeskJet 1510-series printer (DeskJet 1510/1512/1515...) on USB.
-# Run on the Pi as root:  sudo ./02-add-printer.sh
+# Setup step 2: add and share an HP DeskJet 1510-series printer (DeskJet 1510/1512/1515...)
+# on USB. Run on the Pi as root:  sudo ./install/02-add-printer.sh  (PAPER=Letter for Letter)
 # Works even before the printer is plugged in; jobs wait until it is connected.
 set -euo pipefail
 QUEUE="DeskJet_1515"

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run the Pi on Wi-Fi only, with automatic rollback.
+# Optional setup step 5: run the Pi on Wi-Fi only, with automatic rollback.
 #
 # Turns Ethernet autoconnect off (eth0 and wlan0 on the same subnet break inbound
 # connections to the Wi-Fi address: replies leave via eth0) and sets up the Wi-Fi profile:
@@ -9,8 +9,8 @@
 #     router's DHCP pool.
 #
 # Usage (as root):
-#   sudo WIFI_PROFILE=wlan0-MyWifi ./05-wifi-only.sh                                    # DHCP
-#   sudo WIFI_PROFILE=wlan0-MyWifi IP=192.168.1.50/24 GW=192.168.1.1 ./05-wifi-only.sh  # fixed
+#   sudo WIFI_PROFILE=wlan0-MyWifi ./install/05-wifi-only.sh                                    # DHCP
+#   sudo WIFI_PROFILE=wlan0-MyWifi IP=192.168.1.50/24 GW=192.168.1.1 ./install/05-wifi-only.sh  # fixed
 # (WIFI_PROFILE is the file name in /etc/NetworkManager/system-connections without .nmconnection)
 #
 # Runs detached so it survives the SSH session dropping; afterwards reconnect to
@@ -25,7 +25,7 @@ ETH_PROFILE="${ETH_PROFILE:-eth0}"
 
 if [ -z "${DETACHED:-}" ]; then
   DETACHED=1 WIFI_PROFILE="$WIFI_PROFILE" IP="$IP" GW="$GW" DNS="$DNS" ETH_PROFILE="$ETH_PROFILE" \
-    setsid nohup "$0" >/dev/null 2>&1 < /dev/null &
+    setsid nohup bash "$0" >/dev/null 2>&1 < /dev/null &
   if [ -n "$IP" ]; then TARGET="${IP%/*}"; else TARGET="$(hostname).local"; fi
   echo "Switching in the background; reconnect in ~30 s to http://$TARGET/"
   exit 0

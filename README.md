@@ -18,109 +18,211 @@ into a network print and scan server for a USB **HP DeskJet 1515** (any DeskJet
   Network (SSDP/UPnP), Bonjour records for both pages, and QR codes plus a printable
   info sheet for phones.
 
-## Repository layout
+## How the repository is organised
 
-Numbered scripts run **on the Pi** (first-time setup):
+The files are split by **what they are** and **where they run**:
+
+```
+install/   Installation: one-time setup of the Pi's operating system (runs on the Pi)
+config/    Configuration: system settings files and their installer (runs on the Pi)
+app/       Application: the welcome page and the scan page, and their installer (runs on the Pi)
+deploy/    Deployment: the scripts you run on YOUR computer to send the three above to the Pi
+```
+
+You normally only run the scripts in `deploy/`. Each one copies a folder to the Pi over
+SSH and runs the installer inside it:
+
+| You want to... | Run on your computer | What runs on the Pi |
+|---|---|---|
+| Set up a new Pi (everything) | `deploy/deploy-install.sh` | `install/install-all.sh` → steps 01–05, `config/install.sh`, `app/install.sh` |
+| Change a setting in `config/` | `deploy/deploy-config.sh` | `config/install.sh` |
+| Release or test a change in `app/` | `deploy/deploy-app.sh` | `app/install.sh` (inside the package) |
+
+All installers are **safe to run again**: they compare each file with the one already on the
+Pi, change only what differs, and print `unchanged` / `update` for every file. The config
+and app deploy scripts have `--dry-run` to show what would change without changing anything.
+
+<details>
+<summary>Every file, one by one</summary>
 
 | Path | What it is |
 |---|---|
-| `scripts/01-print-server.sh` | Installs CUPS, HPLIP, SANE, Avahi; enables sharing and the CUPS web UI |
-| `scripts/02-add-printer.sh` | Adds and shares the DeskJet queue (A4, retry on error) |
-| `scripts/03-tune-headless.sh` | Disables unneeded services, headless `config.txt`, HDMI off |
-| `scripts/04-networkmanager-without-netplan.sh` | Moves network profiles from netplan to native NetworkManager keyfiles (big boot-time win) |
-| `scripts/05-wifi-only.sh` | Wi-Fi only: Ethernet autoconnect off, Wi-Fi on DHCP (or a fixed IP), auto-rollback |
-| `scripts/06-install-scanweb.sh` | Installs the scan web page as a systemd service |
-| `scripts/07-install-welcome.sh` | Installs the welcome page (port 80) and the Bonjour records for both pages |
-
-The other scripts run **on your computer** (updates after setup):
-
-| Path | What it is |
-|---|---|
-| `scripts/release.sh` | Builds a release package (`dist/*.tar.gz`) and tags the version |
-| `scripts/deploy.sh` | Uploads a release package to the Pi and installs it |
-| `scripts/install-release.sh` | The installer inside each package (runs on the Pi as `install.sh`) |
-
-The rest:
-
-| Path | What it is |
-|---|---|
-| `welcome/welcome.py` | The welcome/status page, SSDP responder and QR encoder |
-| `welcome/welcome.service` | Its systemd unit (throwaway `DynamicUser`, may only bind port 80) |
-| `scanweb/scanweb.py` | The scan web server |
-| `scanweb/scanweb.service` | Its systemd unit (runs as a restricted `scanweb` user) |
-| `config/config.txt.append` | Lines appended to `/boot/firmware/config.txt` |
+| `install/install-all.sh` | Runs the whole setup in order (steps below, then config and app) |
+| `install/01-print-server.sh` | Installs CUPS, HPLIP, SANE, Avahi; enables sharing and the CUPS web UI |
+| `install/02-add-printer.sh` | Adds and shares the DeskJet queue (A4, retry on error) |
+| `install/03-tune-headless.sh` | Disables services a headless print server doesn't need |
+| `install/04-networkmanager-without-netplan.sh` | Moves network profiles from netplan to NetworkManager keyfiles (boot 4 min → under 2 min) |
+| `install/05-wifi-only.sh` | Optional: Wi-Fi only, DHCP (or a fixed IP), automatic rollback |
+| `config/install.sh` | Installs the files below |
+| `config/config.txt.append` | Headless boot settings added to `/boot/firmware/config.txt` (no overclock) |
 | `config/hdmi-off.service` | Turns HDMI output off at boot |
-| `config/wifi.nmconnection.example` | Template Wi-Fi profile (DHCP, fixed IP commented out) |
+| `config/journald-size.conf` | Limits the system log to 30 MB (less SD card wear) |
 | `config/avahi/printserver-*.service` | Bonjour (`_http._tcp`) records for the welcome and scan pages |
+| `config/wifi.nmconnection.example` | Template Wi-Fi profile; not installed automatically (it would hold your Wi-Fi password) |
+| `app/install.sh` | Installs/updates the two services below, restarts what changed, checks they run |
+| `app/welcome/welcome.py` | The welcome/status page (port 80), SSDP responder and QR encoder |
+| `app/welcome/welcome.service` | Its systemd unit (throwaway `DynamicUser`, may only bind port 80) |
+| `app/scanweb/scanweb.py` | The scan web page (port 8080) |
+| `app/scanweb/scanweb.service` | Its systemd unit (runs as a restricted `scanweb` user) |
+| `deploy/deploy-install.sh` | Full setup of a new Pi from your computer |
+| `deploy/deploy-config.sh` | Sends `config/` to the Pi |
+| `deploy/deploy-app.sh` | Builds a release package of `app/` (and tags it), sends it to the Pi |
+| `deploy/lib.sh` | Shared SSH and packaging code for the three scripts above |
+
+</details>
 
 ## Setup
 
-Copy the repository to the Pi (e.g. `git clone` or `scp -r`), then:
+### What you need
+
+- A Raspberry Pi (tested: Pi 1 Model B+), a microSD card (8 GB or more), and a good 5 V
+  power supply (2.5 A recommended, see [Problems](#problems-found-and-how-theyre-handled)).
+- An Ethernet cable for the first setup (Wi-Fi can be set up later, see step 5).
+- The printer, connected by USB. It can be switched off during setup.
+- A computer with **Git** and a **Bash** shell: Linux, macOS, or Windows with
+  [Git for Windows](https://gitforwindows.org/) (use the "Git Bash" app it installs). On
+  Windows, also install [PuTTY](https://www.putty.org/) if you want to log in with a
+  password (its `plink` tool sends it).
+
+### 1. Prepare the SD card
+
+1. Install [Raspberry Pi Imager](https://www.raspberrypi.com/software/) on your computer.
+2. Choose your Pi model and **Raspberry Pi OS Lite** (no desktop; on a Pi 1 the 32-bit one).
+3. When it asks about OS customisation, choose **Edit settings** and set:
+   - a **hostname**, e.g. `printserver` (the Pi will be reachable as `printserver.local`),
+   - a **username and password** (you need them below),
+   - under *Services*: **Enable SSH** with password authentication.
+   - Wi-Fi is optional here. If you set it, you can switch the Pi to Wi-Fi only in step 5.
+4. Write the card, put it in the Pi, connect Ethernet and power. The first boot takes a few
+   minutes.
+
+### 2. Check that you can reach the Pi
+
+In Git Bash (or a terminal):
 
 ```bash
+ping printserver.local          # use your hostname; stop with Ctrl+C
+ssh pi@printserver.local        # use your username; answer "yes" once, then type "exit"
+```
+
+If `ping` doesn't find it, look up the Pi's IP address in your router's list of devices and
+use that instead of `printserver.local` everywhere below.
+
+On Windows with PuTTY, also connect once with `plink pi@printserver.local` (or the PuTTY
+app) and accept the host key: the scripts can't answer that question for you.
+
+### 3. Install everything
+
+Get this repository on your computer and run the full setup:
+
+```bash
+git clone <this repository's URL> rpi-print-server
 cd rpi-print-server
-chmod +x scripts/*.sh
-sudo ./scripts/01-print-server.sh          # CUPS + HP drivers + sharing
-sudo ./scripts/02-add-printer.sh           # add the DeskJet (PAPER=Letter to override A4)
-sudo ./scripts/03-tune-headless.sh         # optional: slim down a headless Pi
-sudo ./scripts/04-networkmanager-without-netplan.sh   # optional: faster boot on slow Pis
-sudo ./scripts/06-install-scanweb.sh       # scan web page
-sudo ./scripts/07-install-welcome.sh       # welcome page on port 80 + Bonjour records
+PI_HOST=printserver.local PI_USER=pi PI_PASS='your password' ./deploy/deploy-install.sh
+```
+
+- `PI_HOST`, `PI_USER` and `PI_PASS` tell the script how to log in. They are only used for
+  this command and are never saved. Leave out `PI_PASS` if you use SSH keys; sudo will then
+  ask for the password.
+- Add `PAPER=Letter` if you don't use A4 paper.
+
+It takes 20–40 minutes on a Pi 1 (mostly downloading and installing packages) and prints a
+heading for each of the 7 steps. Keep the computer awake until it says `Setup finished`.
+If it stops with an error, fix the cause and run the same command again; every step can be
+repeated safely.
+
+### 4. Reboot and test
+
+```bash
+ssh pi@printserver.local sudo reboot
+```
+
+After about 2 minutes, open `http://printserver.local/` in a browser. You should see the
+welcome page with the printer status; `http://printserver.local:8080/` is the scan page.
+Then add the printer on your computers (see [Using it](#using-it)).
+
+### 5. Optional: Wi-Fi only
+
+Do this while the Pi is still on Ethernet, and only if the Pi already has a Wi-Fi profile
+(set in Raspberry Pi Imager, or made from `config/wifi.nmconnection.example`). Find the
+profile's name:
+
+```bash
+ssh pi@printserver.local ls /etc/NetworkManager/system-connections/
+# e.g. wlan0-MyWifi.nmconnection  ->  the profile name is wlan0-MyWifi
+```
+
+Then run the full setup again with `WIFI_PROFILE` set (the other steps find nothing to do,
+apart from re-checking the packages):
+
+```bash
+PI_HOST=printserver.local PI_USER=pi PI_PASS='...' WIFI_PROFILE=wlan0-MyWifi ./deploy/deploy-install.sh
+```
+
+When it says the network is switching, unplug the Ethernet cable, wait ~30 s, check that
+`http://printserver.local/` opens, and reboot. If Wi-Fi doesn't work, the Pi restores the
+previous settings by itself after about 90 s.
+
+The Wi-Fi uses DHCP, so the Pi's address may change, but `http://<hostname>.local/`, the
+Bonjour and SSDP announcements and the welcome page QR codes follow it, and computers
+should add the printer by that name. For a fixed IP instead, run
+`sudo WIFI_PROFILE=wlan0-MyWifi IP=192.168.1.50/24 GW=192.168.1.1 ./install/05-wifi-only.sh`
+on the Pi, and reserve that IP for the Pi in your router (or pick one outside the router's
+DHCP pool) so nothing else gets the same address.
+
+### Without a second computer
+
+Everything can also be run on the Pi itself, from a copy of the repository:
+
+```bash
+sudo apt-get install -y git
+git clone <this repository's URL> rpi-print-server && cd rpi-print-server
+sudo ./install/install-all.sh          # PAPER=... and WIFI_PROFILE=... work here too
 sudo reboot
 ```
 
-Optional, to run on Wi-Fi only (do this while still connected by Ethernet):
+For later changes: `git pull`, then `sudo ./config/install.sh` and/or `sudo ./app/install.sh`.
+
+## Making changes later
+
+Edit the files on your computer, then send them with the matching deploy script. Set the
+connection once per terminal so you don't have to repeat it:
 
 ```bash
-ls /etc/NetworkManager/system-connections/       # find your Wi-Fi profile name
-sudo WIFI_PROFILE=wlan0-MyWifi ./scripts/05-wifi-only.sh
+export PI_HOST=printserver.local PI_USER=pi PI_PASS='...'
 ```
 
-The Wi-Fi then uses DHCP. The address may change, but `http://<hostname>.local/`, the
-Bonjour and SSDP announcements and the welcome page QR codes follow it, and PCs should add
-the printer by that name. For a fixed IP instead, add `IP=192.168.1.50/24 GW=192.168.1.1`,
-and reserve that IP for the Pi in your router (or pick one outside the router's DHCP pool)
-so nothing else gets the same address. If anything goes wrong the script restores the
-previous settings after about 90 s.
-
-## Releasing and deploying changes
-
-Once a Pi is set up, ship later changes from your computer (Linux, macOS, or Git Bash on
-Windows) as a release package instead of copying the repository again.
-
-**1. Release.** Commit your changes, then:
+**Configuration** (`config/`) has no versions: the files as they are now get installed.
 
 ```bash
-./scripts/release.sh v1.2.0 "Short description"   # tags the commit, builds the package
-git push --follow-tags                             # publish the commit and the tag
+./deploy/deploy-config.sh --dry-run    # shows which files would change
+./deploy/deploy-config.sh              # installs them; says if a reboot is needed
 ```
 
-This builds `dist/rpi-print-server-v1.2.0.tar.gz`, which contains the files that go onto
-the Pi, `VERSION`, and `install.sh`. The version is stamped into `welcome.py` and shown in
-the welcome page footer. The script refuses to tag uncommitted changes or reuse a tag.
-Versions follow `vMAJOR.MINOR.PATCH`.
-
-**2. Deploy.**
+**Application** (`app/`): test your change first, then release it.
 
 ```bash
-export PI_HOST=192.168.1.50 PI_USER=pi              # or edit the top of deploy.sh
-./scripts/deploy.sh --dry-run dist/rpi-print-server-v1.2.0.tar.gz   # what would change
-./scripts/deploy.sh dist/rpi-print-server-v1.2.0.tar.gz             # install it
+./deploy/deploy-app.sh --dry-run       # which files would change
+./deploy/deploy-app.sh                 # test: installs your working tree as it is now
+git commit -am "Describe the change"
+./deploy/deploy-app.sh v1.4.0 "Describe the change"   # release: tag, build, install
+git push --follow-tags                 # publish the commit and the tag
 ```
 
-Without a package argument, `deploy.sh` builds a snapshot of your working tree and deploys
-that. The footer then shows e.g. `v1.2.0-3-gabc1234-dirty`, which is handy for testing
-before a release. Never commit a real password into `deploy.sh`, because the repository is
-public. Without `PI_PASS` it uses your SSH keys and sudo asks for the password. With
-`PI_PASS` it needs PuTTY's `plink` (Windows) or `sshpass`.
+- A test deploy shows a version like `v1.3.0-2-gabc1234-dirty` in the welcome page footer
+  (2 commits after v1.3.0, plus uncommitted changes). A release shows `v1.4.0`.
+- A release builds `dist/rpi-print-server-v1.4.0.tar.gz` from the **committed** files only,
+  so it refuses to run with uncommitted changes or a tag that already exists. Versions
+  follow `vMAJOR.MINOR.PATCH`: raise PATCH for fixes, MINOR for new features.
+- To go back to an earlier release: `./deploy/deploy-app.sh dist/rpi-print-server-v1.3.0.tar.gz`.
+- `--no-deploy` only builds (and tags) the package. To install a package by hand, copy it to
+  the Pi and run `tar -xzf rpi-print-server-v1.4.0.tar.gz && sudo ./rpi-print-server-v1.4.0/install.sh`.
 
-The installer copies only the files that differ from the Pi's, restarts only the affected
-services, checks that they're running (and shows their log if not), and skips components
-that were never set up. Without `deploy.sh`, copy the package to the Pi and run:
+The app installer restarts only the services whose files changed and checks that they are
+running; if one doesn't start, it shows the last lines of its log.
 
-```bash
-tar -xzf rpi-print-server-v1.2.0.tar.gz && sudo ./rpi-print-server-v1.2.0/install.sh
-```
+**Installation steps** (`install/`): run `./deploy/deploy-install.sh` again. It repeats all
+steps, which is safe but slow (it runs `apt-get`).
 
 ## Using it
 
@@ -145,7 +247,7 @@ Android resolves `.local` names since Android 12; on older phones type the IP in
 (standard library only); the SSDP part answers searches on UDP 1900 and re-announces
 every 10 minutes.
 
-**CUPS admin:** `http://<pi>:631`. Log in with the Pi user from `01-print-server.sh`.
+**CUPS admin:** `http://<pi>:631`. Log in with the Pi user you set up (`PI_USER`).
 
 **Add the printer on Windows 11** (admin PowerShell):
 
@@ -187,7 +289,7 @@ Raspberry Pi OS trixie and HPLIP 3.22.10:
   profiles to native keyfiles brought boot to under 2 min. Edit keyfiles
   directly; `nmcli connection modify` writes back to `/etc/netplan`.
 - **SSH over Wi-Fi failed while Ethernet was also connected**: both were on the
-  same subnet, so replies left through eth0. Use one interface (see `05-wifi-only.sh`).
+  same subnet, so replies left through eth0. Use one interface (see `install/05-wifi-only.sh`).
 - **`scanimage --format=pdf` writes broken PDFs**: the image stream `/Length`
   and the xref table are all `0`, so most viewers show a blank page. The scan
   server scans JPEG/PNM and builds the PDF itself.

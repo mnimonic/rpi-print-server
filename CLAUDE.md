@@ -11,13 +11,13 @@ be missing on other machines.
 
 - **No overclocking.** Stock clocks/voltage only. Underclocking was offered and the owner
   chose to leave the CPU at stock 700 MHz.
-- **Lean and fast.** Unneeded services are disabled (see `scripts/03-tune-headless.sh`).
+- **Lean and fast.** Unneeded services are disabled (see `install/03-tune-headless.sh`).
   Avoid adding heavy dependencies; the Pi is a single-core ARMv6 at 700 MHz with 512 MB RAM.
   The web pages use only the Python standard library.
 - **Wi-Fi only.** Ethernet autoconnect is off on purpose.
 - **wlan0 uses DHCP** (since 2026-10-27, owner's choice: "let dhcp do its job"). The router has
   no reservation, so the address may change; use `<hostname>.local`, not a hard-coded IP.
-  Switched with `scripts/05-wifi-only.sh` (DHCP is its default).
+  Switched with `install/05-wifi-only.sh` (DHCP is its default).
 - **No router-specific features.** The owner rejected using the router's `.lan` DNS names
   (other users' routers differ). QR codes and the info sheet use `<hostname>.local` (works on the
   owner's Android); the IP is shown as a fallback.
@@ -46,23 +46,26 @@ be missing on other machines.
   ```
   A harmless `<password>: command not found` line appears when sudo already has cached
   credentials; filter it out.
-- **Release, then deploy** (from Git Bash): commit, run `./scripts/release.sh vX.Y.Z "msg"`
-  (tags the commit, builds `dist/rpi-print-server-vX.Y.Z.tar.gz`), then
-  `PI_HOST=... PI_USER=... PI_PASS=... ./scripts/deploy.sh [--dry-run] <package>`.
-  `deploy.sh` without a package deploys a `-dirty` snapshot of the working tree for testing.
-  Pass the credentials as env vars; never write them into `deploy.sh` (it's tracked).
-- The list of deployed files lives in `scripts/release.sh` (`FILES`), and where each one is
-  installed lives in `scripts/install-release.sh`. Keep the two in sync when adding a file.
+- **Three deploy scripts** (Git Bash, credentials as env vars `PI_HOST`/`PI_USER`/`PI_PASS`;
+  never write them into a tracked file):
+  - `./deploy/deploy-app.sh [--dry-run]` deploys a `-dirty` snapshot of `app/` for testing;
+    `./deploy/deploy-app.sh vX.Y.Z "msg"` (after committing) tags, builds
+    `dist/rpi-print-server-vX.Y.Z.tar.gz` and deploys it; `<package>` redeploys an old one.
+  - `./deploy/deploy-config.sh [--dry-run]` installs `config/` (no versions).
+  - `./deploy/deploy-install.sh` runs the full first-time setup (`install/install-all.sh`).
+- Each of `config/` and `app/` has its own `install.sh` that maps files to their installed
+  paths; adding a file means adding a `put` line there. The app package is simply `app/` +
+  `VERSION`; `app/install.sh` stamps the version into `welcome.py` at install time.
 - Pushing commits and tags to GitHub is the owner's call; ask before `git push`.
 - `plink -batch` refuses unknown host keys, and the Pi's address can change (DHCP). The key
   for a new address can be copied from an existing `ssh-ed25519@22:<old ip>` value under
   `HKCU\Software\SimonTatham\PuTTY\SshHostKeys`; plink then still verifies it.
 - For anything that drops the network (switching interfaces), run the change **detached with
-  an automatic rollback** (`setsid nohup`; see `scripts/05-wifi-only.sh`).
+  an automatic rollback** (`setsid nohup`; see `install/05-wifi-only.sh`).
 - Long operations on the Pi 1 (apt, boot ~2 min, 600 dpi scans ~100 s) need long timeouts
   or background runs.
-- Check that the Pi matches the repo with `./scripts/deploy.sh --dry-run` (all lines
-  `unchanged`). A plain `md5sum` of `welcome.py` no longer matches, because the deployed
+- Check that the Pi matches the repo with `./deploy/deploy-app.sh --dry-run` and
+  `./deploy/deploy-config.sh --dry-run` (all lines `unchanged`). A plain `md5sum` of `welcome.py` no longer matches, because the deployed
   copy has the stamped `VERSION` line.
 
 ## Deployed services on the Pi
@@ -70,8 +73,8 @@ be missing on other machines.
 | Service | Port | Runs as | Source |
 |---|---|---|---|
 | `cups` | 631 | root | distro (forced into `multi-user.target`) |
-| `scanweb` | 8080 | `scanweb` (groups lp, scanner) | `scanweb/scanweb.py` |
-| `welcome` | 80, UDP 1900 (SSDP) | `DynamicUser` + CAP_NET_BIND_SERVICE, group video | `welcome/welcome.py` |
+| `scanweb` | 8080 | `scanweb` (groups lp, scanner) | `app/scanweb/scanweb.py` |
+| `welcome` | 80, UDP 1900 (SSDP) | `DynamicUser` + CAP_NET_BIND_SERVICE, group video | `app/welcome/welcome.py` |
 | `hdmi-off` | – | oneshot | `config/hdmi-off.service` |
 | `avahi-daemon` | 5353 | distro | + `config/avahi/printserver-*.service` in `/etc/avahi/services/` |
 

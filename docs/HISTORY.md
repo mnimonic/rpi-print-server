@@ -166,3 +166,18 @@ passwords, Wi-Fi details, MAC addresses, serial numbers) are left out on purpose
   `05-wifi-only.sh`: DHCP by default, fixed IP with `IP=`/`GW=`. The Wi-Fi
   template now uses DHCP too. Session leftovers on the Pi were removed; the
   network backups in `/root/` were kept.
+
+## 16. Split into installation, configuration and application
+
+- The owner asked to split the files by kind, with one deploy script per kind, and
+  to make setup understandable for junior developers and power users.
+- New layout: `install/` (one-time OS setup, steps 01-05 plus `install-all.sh`),
+  `config/` (system settings plus `install.sh`), `app/` (welcome and scan pages plus
+  `install.sh`) and `deploy/` (run on the PC: `deploy-install.sh`, `deploy-config.sh`,
+  `deploy-app.sh`, shared `lib.sh`).
+- `06-install-scanweb.sh` and `07-install-welcome.sh` were folded into `app/install.sh`,
+  which now handles first installs as well as updates. The `config.txt`, HDMI-off and
+  journald parts of `03-tune-headless.sh` moved to `config/install.sh`. `release.sh`
+  was folded into `deploy-app.sh`.
+- The README setup section was rewritten as a step-by-step guide from flashing the
+  SD card onwards.

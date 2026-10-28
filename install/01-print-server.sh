@@ -1,6 +1,8 @@
 #!/bin/bash
-# Install CUPS + HPLIP and share printers on the local network.
-# Run on the Pi as root:  sudo ./01-print-server.sh [admin-user]
+# Setup step 1: install CUPS (printing), HPLIP (HP drivers), SANE (scanning) and Avahi
+# (Bonjour), and share printers on the local network.
+# Run on the Pi as root:  sudo ./install/01-print-server.sh [admin-user]
+# (install-all.sh runs it for you.)
 set -euo pipefail
 ADMIN_USER="${1:-${SUDO_USER:-pi}}"
 
@@ -10,6 +12,8 @@ apt-get install -y -q cups hplip printer-driver-hpcups avahi-daemon sane-utils l
 
 # Let the admin user manage printers in the CUPS web UI (http://<pi>:631)
 usermod -aG lpadmin "$ADMIN_USER"
+# ...and scan from the command line (scanimage)
+usermod -aG lp,scanner "$ADMIN_USER"
 
 # Share printers, allow remote admin from the LAN, enable the web UI
 cupsctl --remote-admin --remote-any --share-printers WebInterface=yes
