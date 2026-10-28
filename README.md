@@ -73,6 +73,9 @@ and app deploy scripts have `--dry-run` to show what would change without changi
 
 ## Setup
 
+**New to this?** Follow the short step-by-step guide in [docs/INSTALL.md](docs/INSTALL.md).
+The rest of this section explains the same steps in more detail.
+
 ### What you need
 
 - A Raspberry Pi (tested: Pi 1 Model B+), a microSD card (8 GB or more), and a good 5 V
