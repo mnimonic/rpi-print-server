@@ -183,10 +183,17 @@ p.sub { color:var(--muted); margin: 0 0 20px; font-size: .9rem; }
 label { display:block; font-weight:600; font-size:.9rem; margin: 14px 0 6px; }
 select { width:100%%; padding:10px; border-radius:8px; border:1px solid var(--border);
          background:var(--card); color:var(--text); font-size:1rem; }
+select:disabled { opacity:.45; cursor:not-allowed; }
+label.off { color:var(--muted); }
 button { width:100%%; margin-top:22px; padding:14px; font-size:1.05rem; font-weight:600;
          border:0; border-radius:8px; background:var(--accent); color:#fff; cursor:pointer; }
 @media (prefers-color-scheme: dark) { button { color:#16181d; } }
-button:disabled { opacity:.6; cursor:wait; }
+button:disabled { opacity:.75; cursor:wait; }
+.spin { display:inline-block; width:1em; height:1em; margin-right:10px; vertical-align:-.15em;
+        border:2.5px solid currentColor; border-right-color:transparent; border-radius:50%%;
+        animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2.4s; } }
 #status { margin-top:16px; color:var(--muted); font-size:.9rem; min-height:1.2em; }
 .err { color:#d93025 !important; }
 </style></head><body><main><div class="card">
@@ -207,10 +214,8 @@ button:disabled { opacity:.6; cursor:wait; }
 <option value="pdf" selected>PDF</option><option value="jpeg">JPEG</option><option value="png">PNG</option>
 <option value="ocrpdf">PDF with searchable text (OCR)</option><option value="txt">Text only (OCR)</option>
 </select>
-<div id="ocr">
-<label for="lang">Text language</label>
+<label for="lang" id="langlabel">Text language (OCR)</label>
 <select id="lang" name="lang">%(langs)s</select>
-</div>
 <button id="b" type="submit">Scan</button>
 <div id="status">%(status)s</div>
 </form></div></main>
@@ -239,10 +244,30 @@ function loadPrefs() {
     if (val && [...sel.options].some(o => o.value === val)) sel.value = val;
   });
 }
-function showOcr() { document.getElementById('ocr').hidden = !isOcr(); }
+// Grey out what doesn't apply: the language without OCR, and with OCR the resolutions above
+// OCR_MAX_RES (the server caps them). A resolution changed for OCR comes back without it.
+const OCR_MAX_RES = %(ocr_max_res)s;
+let resBeforeOcr = null;
+function updateOcr() {
+  const ocr = isOcr(), res = f.elements.res;
+  f.elements.lang.disabled = !ocr;
+  document.getElementById('langlabel').classList.toggle('off', !ocr);
+  for (const o of res.options) o.disabled = ocr && +o.value > OCR_MAX_RES;
+  if (ocr && +res.value > OCR_MAX_RES) {
+    resBeforeOcr = res.value;
+    res.value = String(OCR_MAX_RES);
+  } else if (!ocr && resBeforeOcr) {
+    res.value = resBeforeOcr;
+    resBeforeOcr = null;
+  }
+}
 loadPrefs();
-showOcr();
-f.addEventListener('change', () => { savePrefs(); showOcr(); });
+updateOcr();
+f.addEventListener('change', (e) => {
+  if (e.target.name === 'res') resBeforeOcr = null;
+  updateOcr();
+  savePrefs();
+});
 
 f.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -250,6 +275,13 @@ f.addEventListener('submit', async (e) => {
     ? 'Scanning, then reading the text… this takes about 2–3 minutes.'
     : 'Scanning… this can take up to a minute.';
   const t0 = Date.now();
+  // Spinner and elapsed time in the button while waiting
+  const tick = () => {
+    const t = Math.floor((Date.now() - t0) / 1000);
+    b.innerHTML = '<span class="spin"></span>Working… ' + Math.floor(t / 60) + ':' + String(t %% 60).padStart(2, '0');
+  };
+  tick();
+  const timer = setInterval(tick, 1000);
   try {
     const r = await fetch('/scan?' + new URLSearchParams(new FormData(f)));
     if (!r.ok) throw new Error(await r.text());
@@ -261,7 +293,7 @@ f.addEventListener('submit', async (e) => {
     s.textContent = 'Done: ' + name + ' (' + Math.round((Date.now() - t0) / 1000) + ' s)';
   } catch (err) {
     s.className = 'err'; s.textContent = 'Scan failed: ' + err.message;
-  } finally { b.disabled = false; }
+  } finally { clearInterval(timer); b.textContent = 'Scan'; b.disabled = false; }
 });
 </script></body></html>"""
 
@@ -272,7 +304,8 @@ def render_page(status=""):
     res = "".join(f'<option value="{r}"{" selected" if r == "200" else ""}>{r} dpi</option>'
                   for r in RESOLUTIONS)
     langs = "".join(f'<option value="{k}">{v}</option>' for k, v in OCR_LANGS.items())
-    return PAGE % {"modes": modes, "res": res, "langs": langs, "status": status}
+    return PAGE % {"modes": modes, "res": res, "langs": langs, "ocr_max_res": OCR_MAX_RES,
+                   "status": status}
 
 
 class Handler(BaseHTTPRequestHandler):
