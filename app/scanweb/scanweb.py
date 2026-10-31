@@ -13,7 +13,14 @@ MODES = {"Color": "Colour", "Gray": "Greyscale", "Lineart": "Black & white (smal
 # light-grey text; anything darker than this (paper scans as 255) becomes black.
 BW_THRESHOLD = 200
 RESOLUTIONS = ["75", "100", "200", "300", "600"]   # 1200+ would exhaust the Pi's RAM
-FORMATS = {"pdf": "application/pdf", "jpeg": "image/jpeg", "png": "image/png"}
+FORMATS = {"pdf": "application/pdf", "jpeg": "image/jpeg", "png": "image/png",
+           "ocrpdf": "application/pdf", "txt": "text/plain; charset=utf-8"}   # last two: OCR
+EXTENSIONS = {"jpeg": "jpg", "ocrpdf": "pdf"}
+# Text recognition (Tesseract). A 300 dpi A4 page takes ~2 min with English + Greek on the
+# Pi 1 (~1.5 min with one language); higher resolutions don't read better, only slower.
+OCR_LANGS = {"eng+ell": "English + Greek", "eng": "English", "ell": "Greek"}
+OCR_MAX_RES = 300
+OCR_TIMEOUT = 900
 PAPER = {"a4": ("210", "297"), "letter": ("215.9", "279.4"), "full": ("215.9", "297.011")}
 SCAN_TIMEOUT = 600
 
@@ -131,6 +138,25 @@ def image_pdf(image_dict, stream, page_w_mm, page_h_mm):
     return bytes(out)
 
 
+def ocr(image, ext, res, lang, fmt):
+    """Run Tesseract on a scanned image; return a searchable PDF (fmt "ocrpdf") or UTF-8 text.
+    For a JPEG, Tesseract's PDF embeds the original data unchanged; 1-bit images become G4."""
+    with tempfile.TemporaryDirectory() as d:
+        src, out = os.path.join(d, "scan." + ext), os.path.join(d, "out")
+        kind = "pdf" if fmt == "ocrpdf" else "txt"
+        with open(src, "wb") as f:
+            f.write(image)
+        t0 = time.time()
+        # One OpenMP thread: on the single-core Pi more threads only add overhead (3.5 -> 2 min)
+        p = subprocess.run(["tesseract", src, out, "-l", lang, "--dpi", res, kind], capture_output=True,
+                           text=True, timeout=OCR_TIMEOUT, env={**os.environ, "OMP_THREAD_LIMIT": "1"})
+        if p.returncode != 0:
+            raise RuntimeError("text recognition failed: " + (p.stderr.strip().splitlines() or ["?"])[-1])
+        print(f"OCR ({lang}, {res} dpi, {kind}): {time.time() - t0:.1f}s", flush=True)
+        with open(f"{out}.{kind}", "rb") as f:
+            return f.read()
+
+
 def find_device():
     out = subprocess.run(["scanimage", "-L"], capture_output=True, text=True, timeout=120).stdout
     m = re.search(r"device `(hpaio:[^']+)'", out)
@@ -151,6 +177,8 @@ body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color
 main { max-width: 420px; margin: 40px auto; padding: 0 16px; }
 .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:24px; }
 h1 { font-size: 1.3rem; margin: 0 0 4px; }
+a.home { display:inline-block; margin-bottom: 12px; color:var(--accent); text-decoration:none; font-size:.9rem; }
+a.home:hover { text-decoration:underline; }
 p.sub { color:var(--muted); margin: 0 0 20px; font-size: .9rem; }
 label { display:block; font-weight:600; font-size:.9rem; margin: 14px 0 6px; }
 select { width:100%%; padding:10px; border-radius:8px; border:1px solid var(--border);
@@ -162,6 +190,7 @@ button:disabled { opacity:.6; cursor:wait; }
 #status { margin-top:16px; color:var(--muted); font-size:.9rem; min-height:1.2em; }
 .err { color:#d93025 !important; }
 </style></head><body><main><div class="card">
+<a class="home" id="home" href="/">&larr; Print server home</a>
 <h1>HP DeskJet 1515 scanner</h1>
 <p class="sub">Place the page face-down on the glass, top-left corner.</p>
 <form id="f" action="/scan" method="get">
@@ -176,13 +205,22 @@ button:disabled { opacity:.6; cursor:wait; }
 <label for="fmt">File type</label>
 <select id="fmt" name="fmt">
 <option value="pdf" selected>PDF</option><option value="jpeg">JPEG</option><option value="png">PNG</option>
+<option value="ocrpdf">PDF with searchable text (OCR)</option><option value="txt">Text only (OCR)</option>
 </select>
+<div id="ocr">
+<label for="lang">Text language</label>
+<select id="lang" name="lang">%(langs)s</select>
+</div>
 <button id="b" type="submit">Scan</button>
 <div id="status">%(status)s</div>
 </form></div></main>
 <script>
 const f = document.getElementById('f'), b = document.getElementById('b'), s = document.getElementById('status');
-const FIELDS = ['mode', 'res', 'paper', 'fmt'];
+const FIELDS = ['mode', 'res', 'paper', 'fmt', 'lang'];
+const isOcr = () => ['ocrpdf', 'txt'].includes(f.elements.fmt.value);
+
+// The welcome page is on port 80 of this same host
+document.getElementById('home').href = location.protocol + '//' + location.host.replace(/:\\d+$/, '') + '/';
 
 // Remember selections in a cookie for a year
 function savePrefs() {
@@ -201,12 +239,16 @@ function loadPrefs() {
     if (val && [...sel.options].some(o => o.value === val)) sel.value = val;
   });
 }
+function showOcr() { document.getElementById('ocr').hidden = !isOcr(); }
 loadPrefs();
-f.addEventListener('change', savePrefs);
+showOcr();
+f.addEventListener('change', () => { savePrefs(); showOcr(); });
 
 f.addEventListener('submit', async (e) => {
   e.preventDefault();
-  b.disabled = true; s.className = ''; s.textContent = 'Scanning… this can take up to a minute.';
+  b.disabled = true; s.className = ''; s.textContent = isOcr()
+    ? 'Scanning, then reading the text… this takes about 2–3 minutes.'
+    : 'Scanning… this can take up to a minute.';
   const t0 = Date.now();
   try {
     const r = await fetch('/scan?' + new URLSearchParams(new FormData(f)));
@@ -229,7 +271,8 @@ def render_page(status=""):
                     for k, v in MODES.items())
     res = "".join(f'<option value="{r}"{" selected" if r == "200" else ""}>{r} dpi</option>'
                   for r in RESOLUTIONS)
-    return PAGE % {"modes": modes, "res": res, "status": status}
+    langs = "".join(f'<option value="{k}">{v}</option>' for k, v in OCR_LANGS.items())
+    return PAGE % {"modes": modes, "res": res, "langs": langs, "status": status}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -258,7 +301,9 @@ class Handler(BaseHTTPRequestHandler):
         res = q.get("res", ["200"])[0]
         fmt = q.get("fmt", ["pdf"])[0]
         paper = q.get("paper", ["a4"])[0]
-        if mode not in MODES or res not in RESOLUTIONS or fmt not in FORMATS or paper not in PAPER:
+        lang = q.get("lang", ["eng+ell"])[0]
+        if (mode not in MODES or res not in RESOLUTIONS or fmt not in FORMATS or paper not in PAPER
+                or lang not in OCR_LANGS):
             return self.send_text(400, "Invalid scan settings")
         if not scan_lock.acquire(blocking=False):
             return self.send_text(409, "The scanner is busy with another scan. Try again shortly.")
@@ -270,11 +315,14 @@ class Handler(BaseHTTPRequestHandler):
             w, h = PAPER[paper]
             lineart = mode == "Lineart"
             enhanced = mode == "GrayBW"
+            ocr_fmt = fmt in ("ocrpdf", "txt")
+            if ocr_fmt and int(res) > OCR_MAX_RES:
+                res = str(OCR_MAX_RES)
             if (lineart or enhanced) and fmt == "jpeg":
                 fmt = "png"   # JPEG is unsuitable for pure black & white
             # scanimage's PDF output is malformed (shows blank), and its PDF/PNG writers fail
             # for Lineart: scan JPEG (colour/grey) or raw PNM (both B&W modes) and convert here
-            scan_fmt = "pnm" if (lineart or enhanced) else ("jpeg" if fmt == "pdf" else fmt)
+            scan_fmt = "pnm" if (lineart or enhanced) else ("jpeg" if fmt in ("pdf", "ocrpdf", "txt") else fmt)
             cmd = ["scanimage", "-d", device, "--mode", "Gray" if enhanced else mode,
                    "--resolution", res, "-x", w, "-y", h, f"--format={scan_fmt}"]
             if not lineart:
@@ -298,18 +346,27 @@ class Handler(BaseHTTPRequestHandler):
                     t0 = time.time()
                     bw, bh, bits = gray_to_bits(data, BW_THRESHOLD) if enhanced else read_pbm(data)
                     del data   # free the raw scan before encoding (matters at 600 dpi)
-                    data = pbm_to_pdf(bw, bh, bits, w, h) if fmt == "pdf" else pbm_to_png(bw, bh, bits)
+                    if ocr_fmt:
+                        data = b"P4\n%d %d\n" % (bw, bh) + bits
+                    elif fmt == "pdf":
+                        data = pbm_to_pdf(bw, bh, bits, w, h)
+                    else:
+                        data = pbm_to_png(bw, bh, bits)
                     print(f"B&W conversion ({mode}, {res} dpi): {time.time() - t0:.1f}s", flush=True)
                 elif fmt == "pdf":
                     data = jpeg_to_pdf(data, w, h)
-                name = time.strftime("scan-%Y%m%d-%H%M%S.") + ("jpg" if fmt == "jpeg" else fmt)
+                if ocr_fmt:
+                    data = ocr(data, "pbm" if (lineart or enhanced) else "jpg", res, lang, fmt)
+                name = time.strftime("scan-%Y%m%d-%H%M%S.") + EXTENSIONS.get(fmt, fmt)
                 self.send_response(200)
                 self.send_header("Content-Type", FORMATS[fmt])
                 self.send_header("Content-Length", str(len(data)))
                 self.send_header("Content-Disposition", f'attachment; filename="{name}"')
                 self.end_headers()
                 self.wfile.write(data)
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as e:
+            if e.cmd[0] == "tesseract":
+                return self.send_text(504, "Reading the text took too long and was stopped.")
             device = None
             self.send_text(504, "The scan took too long and was stopped.")
         except Exception as e:   # report instead of dropping the connection

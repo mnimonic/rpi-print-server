@@ -11,7 +11,8 @@ into a network print and scan server for a USB **HP DeskJet 1515** (any DeskJet
 - **Printing**: CUPS + HPLIP, shared on the LAN and discoverable by Windows, macOS,
   iOS and Android (Avahi/IPP).
 - **Scanning**: a small web page (`http://<pi>:8080`) with a Scan button. Pure
-  Python standard library, no extra packages.
+  Python standard library; optional text recognition (OCR, English and Greek) with
+  Tesseract gives searchable PDFs or plain text.
 - **Lean and cool**: unneeded services disabled, headless boot config, no overclock.
 - **Wi-Fi only** (optional): Ethernet off; fixed IP or DHCP on Wi-Fi.
 - **Easy to find**: `http://<hostname>.local/`, an entry in Windows File Explorer →
@@ -278,6 +279,14 @@ Resolutions: 75–600 dpi. 1200+ dpi colour would exhaust the Pi 1's RAM. Output
 can be PDF, JPEG or PNG; for black & white, JPEG is replaced by PNG. On a Pi 1
 a page takes about 25–30 s at 200 dpi and about 100 s at 600 dpi, mostly scanner time.
 
+**Text recognition (OCR):** choose *PDF with searchable text* (the scan with an invisible
+text layer, so you can search and copy from it) or *Text only* (a UTF-8 `.txt` file), and
+the language: English + Greek, English, or Greek. Tesseract runs on the Pi. OCR scans at
+no more than 300 dpi (higher is slower and doesn't read better) and is slow on a Pi 1:
+an A4 page at 300 dpi takes about 2 min to read with English + Greek and 1.5 min with one
+language, on top of the scan. Use 300 dpi and Greyscale or Black & white – enhanced for
+the best results.
+
 ## Problems found and how they're handled
 
 These are the non-obvious issues hit while building this on a Pi 1 with
@@ -304,6 +313,9 @@ Raspberry Pi OS trixie and HPLIP 3.22.10:
 - **hpaio sometimes returns one row fewer than the PNM header announces** (at
   600 dpi). The converter uses the rows actually received.
 - **"Device busy" for a few seconds after each scan.** The server retries.
+- **Tesseract is slower with its default threads on a single core**: OpenMP added
+  a minute of system time (3.5 min instead of 2 min per page). The server runs it
+  with `OMP_THREAD_LIMIT=1`.
 - **Under-voltage after adding a Wi-Fi adapter.** `vcgencmd get_throttled`
   reported `0x50005` (under-voltage and throttling happening now), and the
   kernel logged `hwmon hwmon1: Undervoltage detected!` lasting several minutes

@@ -1,6 +1,6 @@
 #!/bin/bash
-# Setup step 1: install CUPS (printing), HPLIP (HP drivers), SANE (scanning) and Avahi
-# (Bonjour), and share printers on the local network.
+# Setup step 1: install CUPS (printing), HPLIP (HP drivers), SANE (scanning), Tesseract
+# (OCR) and Avahi (Bonjour), and share printers on the local network.
 # Run on the Pi as root:  sudo ./install/01-print-server.sh [admin-user]
 # (install-all.sh runs it for you.)
 set -euo pipefail
@@ -9,6 +9,8 @@ ADMIN_USER="${1:-${SUDO_USER:-pi}}"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get install -y -q cups hplip printer-driver-hpcups avahi-daemon sane-utils libsane-hpaio
+# Text recognition (OCR) for the scan page: English and Greek (~20 MB)
+apt-get install -y -q --no-install-recommends tesseract-ocr tesseract-ocr-eng tesseract-ocr-ell
 
 # Let the admin user manage printers in the CUPS web UI (http://<pi>:631)
 usermod -aG lpadmin "$ADMIN_USER"
