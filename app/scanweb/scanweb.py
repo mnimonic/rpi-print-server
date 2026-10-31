@@ -466,6 +466,13 @@ def start_job(q):
         raise
 
 
+def drop(rec):
+    """Delete a finished scan's file and record (caller holds state_lock)."""
+    del scans[rec["id"]]
+    remove(os.path.join(SCAN_DIR, rec["file"]))
+    remove(os.path.join(SCAN_DIR, rec["id"] + ".json"))
+
+
 def delete_scan(sid):
     with state_lock:
         rec = scans.get(sid)
@@ -473,10 +480,29 @@ def delete_scan(sid):
             return 404, "No such scan"
         if rec["state"] not in ("done", "failed"):
             return 409, "This scan is still running."
-        del scans[sid]
-        remove(os.path.join(SCAN_DIR, rec["file"]))
-        remove(os.path.join(SCAN_DIR, sid + ".json"))
+        drop(rec)
     return 200, "Deleted"
+
+
+# Clean-up choices: keep the newest N scans, or the scans of the last N days
+CLEANUP = {"n10": ("count", 10), "n20": ("count", 20), "n30": ("count", 30), "d30": ("days", 30)}
+
+
+def cleanup(keep):
+    """Delete the finished scans outside the kept set. Returns (count, bytes freed)."""
+    kind, n = CLEANUP[keep]
+    with state_lock:
+        items = sorted(scans.values(), key=lambda r: r["id"], reverse=True)
+        if kind == "count":
+            old = items[n:]
+        else:
+            old = [r for r in items if r["created"] < time.time() - n * 86400]
+        old = [r for r in old if r["state"] in ("done", "failed")]
+        freed = sum(r.get("size") or 0 for r in old)
+        for rec in old:
+            drop(rec)
+    print(f"clean-up ({keep}): deleted {len(old)} scans, {freed >> 20} MB", flush=True)
+    return len(old), freed
 
 
 # ------------------------------------------------------------------ the page
@@ -534,6 +560,16 @@ a.name:hover { text-decoration:underline; }
 .bar.indet i { width:30%%; animation: slide 1.4s ease-in-out infinite; }
 @keyframes slide { from { margin-left:-30%%; } to { margin-left:100%%; } }
 #empty { color:var(--muted); font-size:.9rem; margin:0; }
+[hidden] { display:none !important; }
+.confirm { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:8px; font-size:.85rem; }
+.confirm span { flex:1; min-width:10em; }
+.del.danger { background:var(--err); border-color:var(--err); color:#fff; }
+.del.danger:hover { color:#fff; }
+@media (prefers-color-scheme: dark) { .del.danger, .del.danger:hover { color:#16181d; } }
+.cleanup { display:flex; gap:8px; align-items:center; margin-top:14px; padding-top:14px; border-top:1px solid var(--border); }
+.cleanup select { flex:1; width:auto; padding:6px 8px; font-size:.85rem; }
+#cleanmsg { color:var(--muted); font-size:.85rem; }
+#cleanmsg:not(:empty) { margin-top:8px; }
 </style></head><body><main><div class="card">
 <a class="home" id="home" href="/">&larr; Print server home</a>
 <h1>HP DeskJet 1515 scanner</h1>
@@ -561,6 +597,11 @@ a.name:hover { text-decoration:underline; }
 <h2>Saved scans <small id="free"></small></h2>
 <ul id="list"></ul>
 <p id="empty" hidden>No saved scans yet.</p>
+<div id="cleanup" class="cleanup" hidden>
+<select id="keep" aria-label="Which scans to keep">%(keep)s</select>
+<button type="button" id="clean" class="del">Clean up…</button>
+</div>
+<div id="cleanmsg"></div>
 </div></main>
 <script>
 const f = document.getElementById('f'), b = document.getElementById('b'), s = document.getElementById('status');
@@ -624,7 +665,19 @@ const size = n => n >= 1e9 ? (n / 1e9).toFixed(2) + ' GB' : n >= 1e6 ? (n / 1e6)
 const clock = t => Math.floor(t / 60) + ':' + String(Math.floor(t %% 60)).padStart(2, '0');
 const running = r => !['done', 'failed'].includes(r.state);
 const fileUrl = r => '/scans/' + encodeURIComponent(r.file);
-let mine = null, active = null, fetchedAt = 0, poll = null;
+let mine = null, active = null, fetchedAt = 0, poll = null, lastData = null;
+let confirmDel = null, confirmClean = false;   // open confirmations survive the re-render on each poll
+const KEEP = %(keep_rules)s;
+const keepSel = document.getElementById('keep'), cleanMsg = document.getElementById('cleanmsg');
+
+// An in-page "Are you sure?" row (works the same on every browser and phone)
+function confirmBox(text, onYes, onNo) {
+  const box = el('div', 'confirm'), yes = el('button', 'del danger', 'Yes, delete'), no = el('button', 'del', 'Cancel');
+  yes.type = no.type = 'button';
+  yes.onclick = onYes; no.onclick = onNo;
+  box.append(el('span', null, text), yes, no);
+  return box;
+}
 
 function stepText(r) {
   if (r.state === 'starting') return 'Starting…';
@@ -641,13 +694,9 @@ function render(data) {
     if (r.state === 'done') {
       const a = el('a', 'name', r.file); a.href = fileUrl(r); a.download = r.file; row.append(a);
     } else row.append(el('span', 'name', r.file));
-    if (!running(r)) {
+    if (!running(r) && confirmDel !== r.id) {
       const d = el('button', 'del', 'Delete'); d.type = 'button';
-      d.onclick = async () => {
-        if (!confirm('Delete ' + r.file + '?')) return;
-        await fetch('/scans/' + encodeURIComponent(r.id), {method: 'DELETE'});
-        refresh();
-      };
+      d.onclick = () => { confirmDel = r.id; render(lastData); };
       row.append(d);
     }
     li.append(row);
@@ -661,9 +710,51 @@ function render(data) {
       if (r.state === 'scanning') i.style.width = (r.progress || 0) + '%%'; else bar.classList.add('indet');
       bar.append(i); li.append(bar, el('div', 'meta', stepText(r)));
     } else if (r.state === 'failed') li.append(el('div', 'meta err', r.error));
+    if (confirmDel === r.id) {
+      li.append(confirmBox('Delete this scan?', async () => {
+        confirmDel = null;
+        await fetch('/scans/' + encodeURIComponent(r.id), {method: 'DELETE'});
+        refresh();
+      }, () => { confirmDel = null; render(lastData); }));
+    }
     list.append(li);
   }
+  document.getElementById('cleanup').hidden = data.scans.length === 0;
+  if (confirmClean) renderClean();
 }
+
+// ---- clean-up: delete everything except the newest N scans / the last N days
+function toClean() {
+  const [kind, n] = KEEP[keepSel.value], items = lastData ? lastData.scans : [];   // newest first
+  const old = kind === 'count' ? items.slice(n) : items.filter(r => r.created < Date.now() / 1000 - n * 86400);
+  return old.filter(r => !running(r));
+}
+function renderClean() {
+  cleanMsg.replaceChildren();
+  if (!confirmClean) return;
+  const old = toClean();
+  if (!old.length) {
+    confirmClean = false;
+    cleanMsg.textContent = 'Nothing to delete: all saved scans are kept.';
+    return;
+  }
+  const bytes = old.reduce((a, r) => a + (r.size || 0), 0);
+  cleanMsg.append(confirmBox('Delete ' + old.length + ' older scan' + (old.length > 1 ? 's' : '') +
+                             (bytes ? ' (' + size(bytes) + ')' : '') + '?', async () => {
+    confirmClean = false;
+    cleanMsg.textContent = 'Deleting…';
+    try {
+      const r = await fetch('/scans/cleanup', {method: 'POST', body: new URLSearchParams({keep: keepSel.value})});
+      if (!r.ok) throw new Error(await r.text());
+      const d = await r.json();
+      cleanMsg.textContent = 'Deleted ' + d.deleted + ' scan' + (d.deleted === 1 ? '' : 's') +
+                             (d.freed ? ', freed ' + size(d.freed) : '') + '.';
+    } catch (err) { cleanMsg.textContent = 'Clean-up failed: ' + err.message; }
+    refresh();
+  }, () => { confirmClean = false; renderClean(); }));
+}
+document.getElementById('clean').onclick = () => { confirmClean = true; renderClean(); };
+keepSel.onchange = () => { if (confirmClean) renderClean(); else cleanMsg.textContent = ''; };
 function tick() {   // the Scan button while any scan (from any device) is running
   if (!active) { b.disabled = false; b.textContent = 'Scan'; return; }
   const t = active.elapsed + (Date.now() - fetchedAt) / 1000;
@@ -677,6 +768,7 @@ async function refresh() {
     const r = await fetch('/scans', {cache: 'no-store'});
     const data = await r.json();
     fetchedAt = Date.now();
+    lastData = data;
     render(data);
     active = data.scans.find(running) || null;
     const m = mine && data.scans.find(x => x.id === mine);
@@ -718,7 +810,10 @@ def render_page():
     res = "".join(f'<option value="{k}"{" selected" if k == "200" else ""}>{v}</option>'
                   for k, v in RESOLUTIONS.items())
     langs = "".join(f'<option value="{k}">{v}</option>' for k, v in OCR_LANGS.items())
-    return PAGE % {"modes": modes, "res": res, "langs": langs, "ocr_max_res": OCR_MAX_RES}
+    keep = "".join(f'<option value="{k}">Keep the {"newest " + str(n) if kind == "count" else f"last {n} days"}'
+                   f'</option>' for k, (kind, n) in CLEANUP.items())
+    return PAGE % {"modes": modes, "res": res, "langs": langs, "ocr_max_res": OCR_MAX_RES,
+                   "keep": keep, "keep_rules": json.dumps(CLEANUP)}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -754,10 +849,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_text(404, "Not found")
 
     def do_POST(self):
-        if urlparse(self.path).path != "/scan":
+        path = urlparse(self.path).path
+        if path not in ("/scan", "/scans/cleanup"):
             return self.send_text(404, "Not found")
         n = int(self.headers.get("Content-Length") or 0)
         q = parse_qs(self.rfile.read(min(n, 4096)).decode(errors="replace"))
+        if path == "/scans/cleanup":
+            keep = q.get("keep", [""])[0]
+            if keep not in CLEANUP:
+                return self.send_text(400, "Invalid clean-up choice")
+            count, freed = cleanup(keep)
+            return self.send_json(200, {"deleted": count, "freed": freed})
         code, result = start_job(q)
         if code == 202:
             return self.send_json(202, result)

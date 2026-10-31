@@ -29,7 +29,8 @@ be missing on other machines.
   remembered in a cookie (`scanprefs`). The owner wants every resolution the driver offers
   (75–2400 dpi, though 2400 is interpolated). OCR is English + Greek, capped at 300 dpi.
 - **Saved scans are kept until the owner deletes them** (no automatic cleanup; chosen
-  2026-10-31). They live in `/var/lib/scanweb/scans`, one file + one `.json` record each.
+  2026-10-31): one by one, or with the manual "Clean up" (keep newest 10/20/30, or last
+  30 days). Deletions use an in-page confirmation, not the browser's `confirm()`. They live in `/var/lib/scanweb/scans`, one file + one `.json` record each.
 - The repo is pushed to GitHub: **never commit secrets** (passwords, Wi-Fi PSK/SSID, MACs,
   printer serial, home IPs). Use placeholders like `<pi>` / `192.168.1.50`.
 

@@ -270,8 +270,10 @@ corner of the glass, choose the settings and press **Scan**. The scan runs on th
 and the page shows its progress; the file downloads when done. Every scan is also saved
 on the Pi (`/var/lib/scanweb/scans`) and listed under **Saved scans** with Download and
 Delete, so you can close the page, lose the connection or fetch the file from another
-device. Saved scans are kept until you delete them; the list shows the free space, and
-a scan is refused if the SD card would run low. Selections are remembered in a cookie.
+device. Saved scans are kept until you delete them, one by one or with **Clean up**,
+which deletes everything except the newest 10, 20 or 30 scans, or except the last 30
+days (both ask for confirmation first). The list shows the free space, and a scan is
+refused if the SD card would run low. Selections are remembered in a cookie.
 
 | Colour option | How it is produced | Best for |
 |---|---|---|
