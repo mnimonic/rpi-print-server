@@ -566,10 +566,12 @@ a.name:hover { text-decoration:underline; }
 .del.danger { background:var(--err); border-color:var(--err); color:#fff; }
 .del.danger:hover { color:#fff; }
 @media (prefers-color-scheme: dark) { .del.danger, .del.danger:hover { color:#16181d; } }
-.cleanup { display:flex; gap:8px; align-items:center; margin-top:14px; padding-top:14px; border-top:1px solid var(--border); }
+.cleanup { display:flex; gap:8px; align-items:center; }
 .cleanup select { flex:1; width:auto; padding:6px 8px; font-size:.85rem; }
-#cleanmsg { color:var(--muted); font-size:.85rem; }
+#cleanmsg { color:var(--muted); font-size:.85rem; padding-bottom:14px; margin-bottom:14px;
+            border-bottom:1px solid var(--border); }
 #cleanmsg:not(:empty) { margin-top:8px; }
+#cleanup[hidden] + #cleanmsg { display:none; }
 </style></head><body><main><div class="card">
 <a class="home" id="home" href="/">&larr; Print server home</a>
 <h1>HP DeskJet 1515 scanner</h1>
@@ -595,13 +597,13 @@ a.name:hover { text-decoration:underline; }
 </form></div>
 <div class="card">
 <h2>Saved scans <small id="free"></small></h2>
-<ul id="list"></ul>
-<p id="empty" hidden>No saved scans yet.</p>
 <div id="cleanup" class="cleanup" hidden>
 <select id="keep" aria-label="Which scans to keep">%(keep)s</select>
 <button type="button" id="clean" class="del">Clean up…</button>
 </div>
 <div id="cleanmsg"></div>
+<ul id="list"></ul>
+<p id="empty" hidden>No saved scans yet.</p>
 </div></main>
 <script>
 const f = document.getElementById('f'), b = document.getElementById('b'), s = document.getElementById('status');
@@ -719,7 +721,7 @@ function render(data) {
     }
     list.append(li);
   }
-  document.getElementById('cleanup').hidden = data.scans.length === 0;
+  document.getElementById('cleanup').hidden = data.scans.length === 0;   // at the top: the list can get long
   if (confirmClean) renderClean();
 }
 
