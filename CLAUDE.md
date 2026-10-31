@@ -26,7 +26,10 @@ be missing on other machines.
   Don't change it without asking.
 - **Scan page:** keep all four colour modes ("Black & white" Lineart and
   "Black & white – enhanced"), and keep every dpi option for Lineart too. Selections are
-  remembered in a cookie (`scanprefs`).
+  remembered in a cookie (`scanprefs`). The owner wants every resolution the driver offers
+  (75–2400 dpi, though 2400 is interpolated). OCR is English + Greek, capped at 300 dpi.
+- **Saved scans are kept until the owner deletes them** (no automatic cleanup; chosen
+  2026-10-31). They live in `/var/lib/scanweb/scans`, one file + one `.json` record each.
 - The repo is pushed to GitHub: **never commit secrets** (passwords, Wi-Fi PSK/SSID, MACs,
   printer serial, home IPs). Use placeholders like `<pi>` / `192.168.1.50`.
 
@@ -73,7 +76,7 @@ be missing on other machines.
 | Service | Port | Runs as | Source |
 |---|---|---|---|
 | `cups` | 631 | root | distro (forced into `multi-user.target`) |
-| `scanweb` | 8080 | `scanweb` (groups lp, scanner) | `app/scanweb/scanweb.py` |
+| `scanweb` | 8080 | `scanweb` (groups lp, scanner); state in `/var/lib/scanweb` | `app/scanweb/scanweb.py` |
 | `welcome` | 80, UDP 1900 (SSDP) | `DynamicUser` + CAP_NET_BIND_SERVICE, group video | `app/welcome/welcome.py` |
 | `hdmi-off` | – | oneshot | `config/hdmi-off.service` |
 | `avahi-daemon` | 5353 | distro | + `config/avahi/printserver-*.service` in `/etc/avahi/services/` |
@@ -89,9 +92,14 @@ be missing on other machines.
   individually (`get_config arm_freq`), where `0` means stock.
 - `welcome.py` builds its page with `{{placeholder}}` replacement, **not** `%` formatting:
   the CSS and JS contain literal `%`.
-- In the scan code, `jpeg_to_pdf`/`pbm_to_pdf`/`pbm_to_png` are hand-written encoders
-  (stdlib only) because `scanimage`'s PDF/PNG writers are broken. They were verified
-  round-trip; keep them that way.
+- In the scan code, `write_image_pdf`/`write_png`/`bw_image` are hand-written encoders
+  (stdlib only) because `scanimage`'s PDF/PNG writers are broken. They stream from files in
+  blocks of rows (a 2400 dpi page doesn't fit in RAM). They were verified round-trip with
+  Pillow and pypdf (odd widths, short files, many blocks); re-check that way after changes.
+- Scans run as background jobs (`run_job`); `scan_lock` is taken by the POST and released
+  by the job. A restart marks unfinished jobs as failed. `/tmp` on the Pi is a 238 MB tmpfs,
+  so big files must not go there.
+- Tesseract needs `OMP_THREAD_LIMIT=1` on the single-core Pi (3.5 min → 2 min per page).
 - `welcome.py` has a hand-written QR encoder (byte mode, level M, versions 1–10). It was
   verified by decoding 22 strings across all ten versions with zxing-cpp on the dev PC.
   Re-check the same way after any change.

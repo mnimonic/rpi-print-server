@@ -11,6 +11,8 @@ apt-get update -q
 apt-get install -y -q cups hplip printer-driver-hpcups avahi-daemon sane-utils libsane-hpaio
 # Text recognition (OCR) for the scan page: English and Greek (~20 MB)
 apt-get install -y -q --no-install-recommends tesseract-ocr tesseract-ocr-eng tesseract-ocr-ell
+# cjpeg: JPEG encoding of scans above 600 dpi (scanimage's own JPEG writer fails there)
+apt-get install -y -q --no-install-recommends libjpeg-turbo-progs
 
 # Let the admin user manage printers in the CUPS web UI (http://<pi>:631)
 usermod -aG lpadmin "$ADMIN_USER"

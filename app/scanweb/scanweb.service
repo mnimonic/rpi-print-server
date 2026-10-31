@@ -7,6 +7,8 @@ User=scanweb
 Group=scanweb
 SupplementaryGroups=lp scanner
 ExecStart=/usr/bin/python3 /usr/local/bin/scanweb.py
+# Saved scans: /var/lib/scanweb (owned by scanweb, passed as $STATE_DIRECTORY)
+StateDirectory=scanweb
 Restart=on-failure
 NoNewPrivileges=yes
 PrivateTmp=yes

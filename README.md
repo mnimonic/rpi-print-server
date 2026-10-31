@@ -10,9 +10,10 @@ into a network print and scan server for a USB **HP DeskJet 1515** (any DeskJet
   signal and hardware details.
 - **Printing**: CUPS + HPLIP, shared on the LAN and discoverable by Windows, macOS,
   iOS and Android (Avahi/IPP).
-- **Scanning**: a small web page (`http://<pi>:8080`) with a Scan button. Pure
-  Python standard library; optional text recognition (OCR, English and Greek) with
-  Tesseract gives searchable PDFs or plain text.
+- **Scanning**: a small web page (`http://<pi>:8080`) with a Scan button, 75–2400 dpi.
+  Scans are saved on the Pi and listed for download, so a closed browser or a dropped
+  connection loses nothing. Pure Python standard library; optional text recognition
+  (OCR, English and Greek) with Tesseract gives searchable PDFs or plain text.
 - **Lean and cool**: unneeded services disabled, headless boot config, no overclock.
 - **Wi-Fi only** (optional): Ethernet off; fixed IP or DHCP on Wi-Fi.
 - **Easy to find**: `http://<hostname>.local/`, an entry in Windows File Explorer →
@@ -265,8 +266,12 @@ shared printer by name* → `http://<pi>:631/printers/DeskJet_1515`, and choose 
 Android find it automatically.
 
 **Scanning:** open `http://<pi>:8080`, place the page face-down in the top-left
-corner of the glass, choose the settings and press **Scan**. The file downloads
-when done. Selections are remembered in a cookie.
+corner of the glass, choose the settings and press **Scan**. The scan runs on the Pi
+and the page shows its progress; the file downloads when done. Every scan is also saved
+on the Pi (`/var/lib/scanweb/scans`) and listed under **Saved scans** with Download and
+Delete, so you can close the page, lose the connection or fetch the file from another
+device. Saved scans are kept until you delete them; the list shows the free space, and
+a scan is refused if the SD card would run low. Selections are remembered in a cookie.
 
 | Colour option | How it is produced | Best for |
 |---|---|---|
@@ -275,9 +280,21 @@ when done. Selections are remembered in a cookie.
 | Black & white (smallest files) | Scanner's own Lineart mode | Plain black text at ≥200 dpi |
 | Black & white – enhanced | Greyscale scan, thresholded on the Pi | Most documents; keeps light-grey text, readable even at 75 dpi |
 
-Resolutions: 75–600 dpi. 1200+ dpi colour would exhaust the Pi 1's RAM. Output
-can be PDF, JPEG or PNG; for black & white, JPEG is replaced by PNG. On a Pi 1
-a page takes about 25–30 s at 200 dpi and about 100 s at 600 dpi, mostly scanner time.
+Resolutions: 75–2400 dpi. 1200 dpi is the scanner's optical limit; 2400 dpi is
+interpolated by the driver. Output can be PDF, JPEG or PNG; for black & white, JPEG is
+replaced by PNG. Measured times for an A4 page on a Pi 1 (mostly scanner time):
+
+| Settings | Time | File |
+|---|---|---|
+| Colour, 200 dpi, PDF | 30 s | 0.3 MB |
+| Colour, 1200 dpi, JPEG | 5 min 50 s | 15 MB (9920 × 14028 px) |
+| Black & white – enhanced, 1200 dpi, PDF | 4 min 50 s | 0.8 MB |
+| Black & white, 2400 dpi, PNG | 9 min | 2.2 MB (19840 × 28056 px) |
+
+600 dpi takes about 100 s. Above 600 dpi the raw scan (up to 1.7 GB for colour at
+2400 dpi) goes to the SD card and is converted a block of rows at a time, so it fits in
+the Pi's RAM; colour and greyscale JPEGs are encoded with `cjpeg`. PNG in colour above
+600 dpi works but gives very large files.
 
 **Text recognition (OCR):** choose *PDF with searchable text* (the scan with an invisible
 text layer, so you can search and copy from it) or *Text only* (a UTF-8 `.txt` file), and
@@ -313,6 +330,12 @@ Raspberry Pi OS trixie and HPLIP 3.22.10:
 - **hpaio sometimes returns one row fewer than the PNM header announces** (at
   600 dpi). The converter uses the rows actually received.
 - **"Device busy" for a few seconds after each scan.** The server retries.
+- **Above 600 dpi, `scanimage`'s JPEG writer fails** ("Application transferred too
+  few scanlines"): hpaio delivers a few rows fewer than announced (14028 of 14031 at
+  1200 dpi). The server scans raw PNM, fixes the row count in the header and encodes
+  with `cjpeg` (which also refuses a short file).
+- **`/tmp` is a RAM disk (238 MB)** on Raspberry Pi OS, too small for a 1200 dpi scan.
+  Scans and work files go to `/var/lib/scanweb` (systemd `StateDirectory=`).
 - **Tesseract is slower with its default threads on a single core**: OpenMP added
   a minute of system time (3.5 min instead of 2 min per page). The server runs it
   with `OMP_THREAD_LIMIT=1`.
